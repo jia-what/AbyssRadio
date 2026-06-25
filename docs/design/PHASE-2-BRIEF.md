@@ -1,6 +1,6 @@
 # Phase 2 交接简报（续接用）
 
-> 用途：上下文重置后，新会话先读本文件 + `README.md` + `docs/design/AI Radio — Experience & Design Vision.md`，即可无缝接续 Phase 2。
+> 用途：上下文重置后，新会话先读本文件 + `README.md` + `docs/design/AI Radio — Experience & Design Vision.md` + `images/` 里的 3 张参考图，即可无缝接续 Phase 2。
 
 ## 当前状态（基线）
 
@@ -23,7 +23,10 @@
 - **悬停放大/预览**，点击播放。
 - 与背景粒子联动（PULSE）的钩子先留接口，真正粒子背景在 Phase 4。
 
-> ⚠️ 新会话务必让用户**重新发一次 Phase 2 的参考截图**（3 张：歌单堆叠、悬停放大、点进歌曲展开）。图片不会跨会话保留。
+> 📷 参考图已存于仓库根目录 `images/`（直接读，无需用户重发）：
+> - `images/主屏幕样式.png` — 主屏：满屏封面粒子背景 + 居中歌词 + 右侧 3D 倾斜歌单卡片堆叠
+> - `images/鼠标歌单状态栏.png` — 悬停歌单时的放大状态
+> - `images/歌单展开后界面状态栏.png` — 点进歌单后歌曲展开的状态
 
 ### 主要改动文件
 - `ai-radio-v1/src/components/columns/PlaylistColumn.tsx`（核心：列表→3D 堆叠）
