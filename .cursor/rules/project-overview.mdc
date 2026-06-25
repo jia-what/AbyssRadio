@@ -1,0 +1,21 @@
+---
+description: AI Radio 项目结构与启动方式（始终加载）
+alwaysApply: true
+---
+
+# AI Radio — 项目概览
+
+沉浸式音乐空间网页电台：满屏专辑封面粒子背景 + 居中歌词，四周面板鼠标贴边自动浮出（左 AI / 右歌单 / 下播放条）。低信息密度、悬浮、克制动画。
+
+## 在用目录（只改这两个）
+- 前端：`ai-radio-v1/`（React + TypeScript + Vite + Tailwind + Motion）
+- 后端：`ai-radio/server/`（Node + Express）
+- 其余：`docs/`（文档）、`prototypes/`（HTML 原型）、`_archive/`（死代码，git 未跟踪，搜索时忽略它）
+
+## 启动
+根目录 `start.bat`（清 4000/3000 端口后同时拉起前后端）。后端 http://localhost:4000，前端 http://localhost:3000。
+
+## 续接 / 路线（接新任务先读）
+- 阶段进度与下一步：`docs/design/PHASE-2-BRIEF.md`
+- 设计愿景：`docs/design/AI Radio — Experience & Design Vision.md`
+- 参考图：`images/`

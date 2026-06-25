@@ -1,0 +1,20 @@
+---
+description: AI Radio 开发约定与环境坑（始终加载）
+alwaysApply: true
+---
+
+# 开发约定与坑
+
+## 环境（踩过的坑，务必遵守）
+- ⚠️ 本环境的终端会吞掉 PowerShell 的 `$` 变量（`$_`、`$p` 会变空）。写命令避免用 PS 变量；改用通配符路径、`-LiteralPath`、或纯 git/node 命令。PowerShell 里不能用 `&` 链式，用 `;`。
+- ⚠️ 端口 4000 常残留旧后端（现象：新代码不生效 / 接口 404 / 行为像旧版）。先 `Get-NetTCPConnection -LocalPort 4000` 查 PID → `taskkill /F /PID <pid>`，或直接用 `start.bat`（自带清理）。
+- 改后端需重启才生效；改前端有 vite 热更新。后端起好会打印 `Abyss Radio API running on http://localhost:4000`。
+
+## 代码约定
+- 封面图统一经后端代理 `/api/img` + `utils/img.ts`（兼容协议相对 `//` URL），不要前端直连平台图片。
+- 歌单内播放走 `useRadioState.playPlaylist()`（队列=整张歌单按序、按 id+source 精确取流），不要用搜索来播歌单里的歌。
+- 歌词 `LyricLight.tsx`：三行滚动 + 逐字卡拉OK（rAF 60fps 平滑、按演唱节奏封顶高光）。**不要加回淡入淡出。**
+
+## 工作流
+- 每完成一个阶段 `git commit` 一次（如 `Phase 2: 侧栏 3D 堆叠`）作为检查点。
+- 改完前端用 ReadLints 自查；不硬删文件（无 git 时移到 `_archive/`）。
