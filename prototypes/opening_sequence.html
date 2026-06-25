@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Radio — Portal</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; height: 100vh; width: 100vw; font-family: system-ui, -apple-system, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; }
+
+  /* ===== UI OVERLAY ===== */
+  #ui-layer {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  #ui-layer.visible { opacity: 1; }
+
+  /* Glass panel */
+  .glass-panel {
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 1px rgba(255,255,255,0.05);
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-panel::before {
+    content: '';
+    position: absolute; inset: 0; border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0) 50%, rgba(255,255,255,0.05) 70%, rgba(255,255,255,0.2) 100%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Main UI container */
+  #radio-ui {
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+    transform: translateY(10px); transition: transform 3s cubic-bezier(0.22, 1, 0.36, 1);
+    max-width: 520px; width: 90%;
+  }
+  #ui-layer.visible #radio-ui { transform: translateY(0); }
+
+  /* Title */
+  #title-area { text-align: center; margin-bottom: 4px; }
+  #title-area .supertitle {
+    color: rgba(255,255,255,0.2); font-size: 10px; letter-spacing: 4px;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  #title-area h1 {
+    color: rgba(255,255,255,0.85); font-size: 28px; font-weight: 300; letter-spacing: 2px;
+  }
+  #title-area h1 span { color: rgba(140, 190, 255, 0.5); }
+
+  /* Track display */
+  #track-display {
+    width: 100%; padding: 20px 28px;
+    display: flex; flex-direction: column; gap: 10px;
+    pointer-events: auto;
+  }
+  #track-display .now-label {
+    color: rgba(255,255,255,0.2); font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+  }
+  #track-display .track-name {
+    color: rgba(255,255,255,0.7); font-size: 16px; font-weight: 300; letter-spacing: 0.5px;
+  }
+  #track-display .artist-name {
+    color: rgba(255,255,255,0.3); font-size: 12px; font-weight: 300;
+  }
+  #track-display .progress {
+    width: 100%; height: 2px; background: rgba(255,255,255,0.04); border-radius: 1px; margin-top: 4px;
+  }
+  #track-display .progress-fill {
+    height: 100%; width: 42%; background: rgba(140, 190, 255, 0.2); border-radius: 1px;
+  }
+
+  /* Controls row */
+  #controls {
+    display: flex; gap: 10px; width: 100%;
+    pointer-events: auto;
+  }
+  #controls button {
+    flex: 1;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.5);
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 11px; letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    font-family: inherit;
+  }
+  #controls button:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.8);
+  }
+  #controls button:active { transform: scale(0.97); }
+
+  /* Chat area */
+  #live-chat {
+    width: 100%; padding: 16px 20px;
+    display: flex; align-items: center; gap: 12px;
+    pointer-events: auto;
+  }
+  #live-chat .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(140, 190, 255, 0.5);
+    flex-shrink: 0;
+  }
+  #live-chat .msg {
+    color: rgba(255,255,255,0.35); font-size: 12px; font-weight: 300; line-height: 1.4;
+  }
+  #live-chat .msg em { color: rgba(255,255,255,0.5); font-style: normal; }
+  #live-chat .time {
+    color: rgba(255,255,255,0.15); font-size: 10px; margin-left: auto; flex-shrink: 0;
+  }
+
+  /* Holographic decorative elements */
+  #holo-ring {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 400px; height: 400px; border-radius: 50%;
+    border: 1px solid rgba(140, 190, 255, 0.04);
+    pointer-events: none; z-index: 5;
+    opacity: 0; transition: opacity 5s ease;
+    box-shadow: 0 0 60px rgba(140, 190, 255, 0.02), inset 0 0 60px rgba(140, 190, 255, 0.02);
+  }
+  #holo-ring.visible { opacity: 1; }
+
+  #holo-ring-2 {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(30deg);
+    width: 320px; height: 320px; border-radius: 50%;
+    border: 1px solid rgba(140, 190, 255, 0.025);
+    pointer-events: none; z-index: 5;
+    opacity: 0; transition: opacity 6s ease 0.5s;
+  }
+  #holo-ring-2.visible { opacity: 1; }
+
+  #replay-btn {
+    position: fixed; bottom: 30px; right: 30px;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.15); padding: 6px 16px; border-radius: 10px;
+    cursor: pointer; font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+    transition: all 0.3s; z-index: 20; pointer-events: auto;
+    font-family: inherit;
+  }
+  #replay-btn:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); }
+  #replay-btn:active { transform: scale(0.95); }
+
+  #phase-label {
+    position: fixed; bottom: 30px; left: 30px;
+    color: rgba(255,255,255,0.04); font-size: 9px; letter-spacing: 3px;
+    text-transform: uppercase; pointer-events: none; z-index: 5;
+    transition: opacity 0.8s ease;
+    font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="phase-label">DARKNESS</div>
+
+<!-- Holographic rings -->
+<div id="holo-ring"></div>
+<div id="holo-ring-2"></div>
+
+<!-- UI Layer -->
+<div id="ui-layer">
+  <div id="radio-ui">
+    <div id="title-area">
+      <div class="supertitle">─────────────────  signal acquired</div>
+      <h1>AI <span>·</span> RADIO</h1>
+    </div>
+
+    <div id="track-display" class="glass-panel">
+      <div class="now-label">Now processing</div>
+      <div class="track-name">Awaiting your voice</div>
+      <div class="artist-name">— — —</div>
+      <div class="progress"><div class="progress-fill"></div></div>
+    </div>
+
+    <div id="controls">
+      <button id="btn-request">↳  Request song</button>
+      <button id="btn-skip">⏭  Skip track</button>
+    </div>
+
+    <div id="live-chat" class="glass-panel">
+      <div class="dot"></div>
+      <div class="msg"><em>AI·DJ</em>  —  Frequency locked. Standing by.</div>
+      <div class="time">00:00</div>
+    </div>
+  </div>
+</div>
+
+<button id="replay-btn">↻ Replay</button>
+
+<script>
+// ============= PURE CANVAS — AI RADIO PORTAL =============
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============= PARTICLE SYSTEM =============
+class Ember {
+  constructor() {
+    this.active = false;
+    this.x = 0; this.y = 0; this.z = 0;
+    this.vx = 0; this.vy = 0; this.vz = 0;
+    this.life = 0; this.maxLife = 0;
+    this.size = 0;
+    this.brightness = 0;
+    this.hue = 0.55; // blue range default
+  }
+  spawn(cx, cy, cz, intensity, colorShift) {
+    this.active = true;
+    this.x = cx + (Math.random() - 0.5) * 0.2;
+    this.y = cy + (Math.random() - 0.5) * 0.2;
+    this.z = cz + (Math.random() - 0.5) * 0.2;
+
+    const angle = Math.random() * Math.PI * 2;
+    const elev = (Math.random() - 0.5) * Math.PI * 0.8;
+    const speed = 1.5 + Math.random() * 5 * intensity;
+    this.vx = Math.cos(angle) * Math.cos(elev) * speed;
+    this.vy = Math.sin(elev) * speed + (Math.random() - 0.5) * 0.5;
+    this.vz = Math.sin(angle) * Math.cos(elev) * speed;
+
+    this.maxLife = 0.8 + Math.random() * 2.0;
+    this.life = this.maxLife;
+    this.size = 0.8 + Math.random() * 3.0 * intensity;
+    this.brightness = 0.4 + Math.random() * 0.6;
+    this.hue = 0.55 + colorShift * 0.1 + (Math.random() - 0.5) * 0.08;
+  }
+  update(delta, gravity) {
+    if (!this.active) return;
+    this.life -= delta;
+    if (this.life <= 0) { this.active = false; return; }
+
+    this.vx *= 0.98;
+    this.vy *= 0.97;
+    this.vz *= 0.98;
+    this.vy -= gravity * delta;
+
+    this.x += this.vx * delta * 2;
+    this.y += this.vy * delta * 2;
+    this.z += this.vz * delta * 2;
+  }
+  draw(ctx, cx, cy, scale, camZ) {
+    if (!this.active) return;
+
+    const lifeRatio = this.life / this.maxLife;
+    const screenX = cx + (this.x - cx * 0.02) * 120 / (1 + (this.z + camZ) * 0.02);
+    const screenY = cy + (this.y - cy * 0.02) * 120 / (1 + (this.z + camZ) * 0.02);
+    const depth = 1 / (1 + (this.z + camZ) * 0.03);
+
+    const size = this.size * depth * lifeRatio;
+    if (size < 0.2) return;
+
+    const alpha = lifeRatio * this.brightness * 0.7;
+
+    // Color: warm-white to blue
+    const r = 120 + 135 * (1 - this.hue + 0.2);
+    const g = 160 + 95 * (1 - Math.abs(this.hue - 0.6) * 2);
+    const b = 200 + 55 * this.hue;
+
+    // Glow
+    const grad = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, size * 4);
+    grad.addColorStop(0, `rgba(${r|0}, ${g|0}, ${b|0}, ${alpha * 0.5})`);
+    grad.addColorStop(0.3, `rgba(${r|0}, ${g|0}, ${b|0}, ${alpha * 0.15})`);
+    grad.addColorStop(1, `rgba(${r|0}, ${g|0}, ${b|0}, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, size * 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+const EMBER_COUNT = 1200;
+const embers = Array.from({ length: EMBER_COUNT }, () => new Ember());
+
+let nextEmber = 0;
+
+// ============= AMBIENT BACKGROUND STARS =============
+const starCount = 200;
+const stars = Array.from({ length: starCount }, () => ({
+  x: (Math.random() - 0.5) * 30,
+  y: (Math.random() - 0.5) * 20,
+  z: 3 + Math.random() * 15,
+  size: 0.2 + Math.random() * 0.8,
+  twinkle: Math.random() * Math.PI * 2
+}));
+
+// ============= SEQUENCE STATE =============
+const labelEl = document.getElementById('phase-label');
+const uiLayer = document.getElementById('ui-layer');
+const holoRing = document.getElementById('holo-ring');
+const holoRing2 = document.getElementById('holo-ring-2');
+const replayBtn = document.getElementById('replay-btn');
+
+const STATE = {
+  DARKNESS: 0,         // Pitch black void, subtle stars, camera dolly begins
+  WINDUP: 1,           // Core light trembles, winding up for strike
+  STRIKE_1: 2,         // First hammer strike - sparks explode
+  STRIKE_2: 3,         // Second strike - more intense
+  STRIKE_3: 4,         // Third strike - peak intensity
+  FLASHBANG: 5,        // Sudden full-screen white flash
+  AFTERGLOW: 6,        // White slowly fades, UI materializes
+  COMPLETE: 7          // Ambient forever
+};
+
+let currentState = STATE.DARKNESS;
+let stateTimer = 0;
+let sequenceTime = 0;
+let flashIntensity = 0;
+let cameraDolly = 0; // continuous dolly-in
+let uiOpacity = 0;
+let strikePhase = 0;
+
+// Core light
+const core = { x: 0, y: 0.1, z: 0 };
+
+// ============= STRIKE FUNCTIONS =============
+function doStrike(force) {
+  // Spawn massive spark explosion
+  const count = Math.floor(80 + 120 * force);
+  for (let i = 0; i < count; i++) {
+    const e = embers[nextEmber % EMBER_COUNT];
+    nextEmber++;
+    e.spawn(0, 0.1, 0, force, i / count);
+  }
+
+  // Flash
+  flashIntensity = 0.3 + 0.4 * force;
+}
+
+// ============= DRAW FUNCTIONS =============
+function drawCore(cx, cy, intensity, tremor) {
+  // Trembling offset
+  const ox = (Math.random() - 0.5) * tremor * 2;
+  const oy = (Math.random() - 0.5) * tremor * 2;
+
+  // Multiple glow layers
+  for (let i = 6; i >= 0; i--) {
+    const radius = (15 + i * 20) * intensity;
+    const alpha = 0.06 * (1 - i / 7) * intensity;
+    const grad = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, radius);
+    grad.addColorStop(0, `rgba(200, 220, 255, ${alpha * 0.4})`);
+    grad.addColorStop(0.5, `rgba(130, 170, 255, ${alpha * 0.2})`);
+    grad.addColorStop(1, 'rgba(100, 150, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Hot core
+  const coreR = 3 * intensity;
+  const grad = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, coreR * 5);
+  grad.addColorStop(0, `rgba(255, 255, 255, ${0.8 * intensity})`);
+  grad.addColorStop(0.1, `rgba(220, 235, 255, ${0.5 * intensity})`);
+  grad.addColorStop(0.3, `rgba(170, 200, 255, ${0.2 * intensity})`);
+  grad.addColorStop(1, 'rgba(100, 150, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx + ox, cy + oy, coreR * 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  return { ox, oy };
+}
+
+function drawStars(time, alpha) {
+  if (alpha <= 0) return;
+  for (const s of stars) {
+    const twinkle = 0.5 + 0.5 * Math.sin(time * 0.5 + s.twinkle);
+    const depth = 1 / (1 + (s.z + cameraDolly * 0.3) * 0.05);
+    const sx = W/2 + s.x * 40 * depth;
+    const sy = H/2 + s.y * 40 * depth;
+    const alpha2 = alpha * twinkle * 0.3 * depth;
+    if (alpha2 < 0.01) continue;
+
+    ctx.fillStyle = `rgba(180, 200, 255, ${alpha2})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy, s.size * depth, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawEmbers(cx, cy, time) {
+  for (const e of embers) {
+    e.draw(ctx, cx, cy, 1, cameraDolly);
+  }
+}
+
+function updateEmbers(delta, time) {
+  for (const e of embers) {
+    e.update(delta, 0.5);
+  }
+}
+
+// ============= FLASHBANG =============
+function drawFlashbang(intensity) {
+  if (intensity <= 0) return;
+
+  // Full screen white
+  const alpha = Math.min(1, intensity * 1.5);
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Center hotspot
+  if (intensity > 0.5) {
+    const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.5);
+    grad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1, (intensity - 0.5) * 2)})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawAfterglow(intensity) {
+  if (intensity <= 0) return;
+
+  // Gradually clearing white fog
+  const alpha = Math.max(0, intensity);
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Warm center glow fading
+  const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.4);
+  grad.addColorStop(0, `rgba(255, 240, 230, ${alpha * 0.15})`);
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(W/2, H/2, W * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Subtle horizontal light rays
+  ctx.strokeStyle = `rgba(200, 220, 255, ${alpha * 0.02})`;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 20; i++) {
+    const y = H * (0.2 + Math.random() * 0.6);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y + (Math.random() - 0.5) * 40);
+    ctx.stroke();
+  }
+}
+
+// ============= HOLOGRAPHIC SCAN LINE =============
+function drawHoloScan(time, alpha) {
+  if (alpha <= 0) return;
+
+  // Subtle horizontal scan
+  ctx.fillStyle = `rgba(140, 190, 255, ${0.015 * alpha})`;
+  const scanY = (time * 0.3 % 1) * H;
+  ctx.fillRect(0, scanY - 1, W, 2);
+
+  // Top and bottom lines
+  ctx.fillStyle = `rgba(140, 190, 255, ${0.03 * alpha})`;
+  ctx.fillRect(W * 0.15, H * 0.08, W * 0.7, 1);
+  ctx.fillRect(W * 0.15, H * 0.92, W * 0.7, 1);
+}
+
+// ============= AMBIENT PARTICLES (after complete) =============
+function drawAmbientParticles(time, alpha) {
+  if (alpha <= 0) return;
+  // Slow drifting dots
+  for (let i = 0; i < 40; i++) {
+    const x = (Math.sin(time * 0.05 + i * 1.7) * 0.5 + 0.5) * W;
+    const y = (Math.cos(time * 0.03 + i * 2.3) * 0.5 + 0.5) * H;
+    const size = 0.5 + Math.sin(time * 0.1 + i) * 0.3;
+    ctx.fillStyle = `rgba(140, 190, 255, ${0.02 * alpha})`;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ============= FRAME COUNTER & VIGNETTE =============
+function drawVignette() {
+  const grad = ctx.createRadialGradient(W/2, H/2, H * 0.3, W/2, H/2, H * 0.9);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.4)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ============= MAIN LOOP =============
+let lastTime = 0;
+let strikeTimer = 0;
+let strikeCount = 0;
+
+function frame(time) {
+  const delta = Math.min(0.05, (time - lastTime) / 1000);
+  lastTime = time;
+  sequenceTime += delta;
+  stateTimer += delta;
+
+  const cx = W/2;
+  const cy = H/2;
+
+  // Clear to black
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Camera continuous dolly-in (very slow)
+  cameraDolly += delta * 0.15;
+
+  // ===== STATE MACHINE =====
+  switch (currentState) {
+    case STATE.DARKNESS: {
+      labelEl.textContent = 'DARKNESS';
+      labelEl.style.opacity = '1';
+
+      // Stars barely visible
+      drawStars(sequenceTime, 0.3);
+
+      // Faint core
+      drawCore(cx, cy, 0.08, 0.2);
+
+      if (stateTimer > 1.5) {
+        currentState = STATE.WINDUP;
+        stateTimer = 0;
+      }
+      break;
+    }
+
+    case STATE.WINDUP: {
+      labelEl.textContent = 'CHARGING';
+      labelEl.style.opacity = '0.6';
+
+      drawStars(sequenceTime, 0.2);
+
+      // Core trembles and brightens
+      const windup = Math.min(1, stateTimer / 1.5);
+      const tremor = windup * 3;
+      const brightness = 0.1 + windup * 0.4;
+      drawCore(cx, cy, brightness, tremor);
+
+      // Sparks starting to leak
+      if (stateTimer > 0.8 && Math.random() < 0.4) {
+        const e = embers[nextEmber % EMBER_COUNT];
+        nextEmber++;
+        e.spawn(0, 0.1, 0, 0.3, Math.random());
+      }
+      updateEmbers(delta, sequenceTime);
+      drawEmbers(cx, cy, sequenceTime);
+
+      // Camera dolly speeds up slightly
+      cameraDolly += delta * 0.1;
+
+      if (stateTimer > 2.0) {
+        currentState = STATE.STRIKE_1;
+        stateTimer = 0;
+        doStrike(0.6);
+        strikeCount = 1;
+        labelEl.textContent = 'STRIKE Ⅰ';
+      }
+      break;
+    }
+
+    case STATE.STRIKE_1:
+    case STATE.STRIKE_2:
+    case STATE.STRIKE_3: {
+      const strikeIndex = currentState - STATE.STRIKE_1; // 0, 1, 2
+      const force = 0.6 + strikeIndex * 0.3;
+
+      drawStars(sequenceTime, 0.1);
+
+      // Flash from strike
+      if (flashIntensity > 0) {
+        drawFlashbang(flashIntensity * 0.3);
+        flashIntensity *= 0.85;
+        if (flashIntensity < 0.01) flashIntensity = 0;
+      }
+
+      // Core is bright after strike
+      drawCore(cx, cy, 0.3 + force * 0.3, 1.5);
+
+      updateEmbers(delta, sequenceTime);
+      drawEmbers(cx, cy, sequenceTime);
+
+      cameraDolly += delta * 0.2;
+
+      if (stateTimer > 0.6 && strikeIndex < 2) {
+        // Next strike
+        currentState++;
+        stateTimer = 0;
+        doStrike(0.7 + currentState * 0.15);
+        strikeCount++;
+        labelEl.textContent = stateTimer < 0.1
+          ? 'STRIKE Ⅱ'
+          : 'STRIKE Ⅲ';
+      } else if (stateTimer > 0.6) {
+        // After third strike - flashbang!
+        currentState = STATE.FLASHBANG;
+        stateTimer = 0;
+        flashIntensity = 0.8;
+        // Spawn one final massive burst
+        for (let i = 0; i < 200; i++) {
+          const e = embers[nextEmber % EMBER_COUNT];
+          nextEmber++;
+          e.spawn(0, 0.1, 0, 2.0, Math.random());
+        }
+      }
+
+      // Update label
+      if (currentState === STATE.STRIKE_2) labelEl.textContent = 'STRIKE Ⅱ';
+      else if (currentState === STATE.STRIKE_3) labelEl.textContent = 'STRIKE Ⅲ';
+      break;
+    }
+
+    case STATE.FLASHBANG: {
+      // BLINDING WHITE
+      drawFlashbang(1.0);
+
+      // Stars completely gone
+      // Embers overwhelmed by white
+
+      cameraDolly += delta * 0.05;
+
+      labelEl.textContent = '✦';
+      labelEl.style.opacity = '0.8';
+
+      if (stateTimer > 0.6) {
+        currentState = STATE.AFTERGLOW;
+        stateTimer = 0;
+        flashIntensity = 0;
+      }
+      break;
+    }
+
+    case STATE.AFTERGLOW: {
+      const t = stateTimer / 4.0;
+
+      // White slowly fades
+      const glow = Math.max(0, 1 - t * 1.2);
+      drawAfterglow(glow);
+
+      // Stars faintly return
+      drawStars(sequenceTime, Math.max(0, (t - 0.3) * 0.3));
+
+      // Embers fading into ambient
+      updateEmbers(delta, sequenceTime);
+      drawEmbers(cx, cy, sequenceTime);
+
+      cameraDolly += delta * 0.02;
+
+      // UI materializes
+      if (t > 0.25 && !uiLayer.classList.contains('visible')) {
+        uiLayer.classList.add('visible');
+        holoRing.classList.add('visible');
+        setTimeout(() => holoRing2.classList.add('visible'), 800);
+      }
+
+      uiOpacity = Math.min(1, Math.max(0, (t - 0.2) / 0.5));
+
+      drawHoloScan(sequenceTime, uiOpacity);
+
+      labelEl.style.opacity = Math.max(0, 1 - t * 2);
+
+      if (stateTimer >= 5.0) {
+        currentState = STATE.COMPLETE;
+        stateTimer = 0;
+        labelEl.style.opacity = '0';
+      }
+      break;
+    }
+
+    case STATE.COMPLETE: {
+      // Ambient state forever
+      drawStars(sequenceTime, 0.2);
+
+      // Subtle core
+      const ambientCore = 0.08 + Math.sin(sequenceTime * 0.3) * 0.03;
+      drawCore(cx, cy, ambientCore, 0.1);
+
+      // Few ambient particles
+      updateEmbers(delta, sequenceTime);
+      drawEmbers(cx, cy, sequenceTime);
+
+      drawHoloScan(sequenceTime, 0.6);
+      drawAmbientParticles(sequenceTime, 0.5);
+
+      cameraDolly += delta * 0.005;
+      break;
+    }
+  }
+
+  // Always draw vignette
+  drawVignette();
+
+  requestAnimationFrame(frame);
+}
+
+// ============= REPLAY =============
+replayBtn.addEventListener('click', () => {
+  // Reset everything
+  embers.forEach(e => { e.active = false; });
+  currentState = STATE.DARKNESS;
+  stateTimer = 0;
+  sequenceTime = 0;
+  flashIntensity = 0;
+  cameraDolly = 0;
+  uiOpacity = 0;
+  nextEmber = 0;
+  strikeCount = 0;
+  uiLayer.classList.remove('visible');
+  holoRing.classList.remove('visible');
+  holoRing2.classList.remove('visible');
+  labelEl.style.opacity = '1';
+  labelEl.textContent = 'DARKNESS';
+});
+
+// ============= START =============
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

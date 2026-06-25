@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Radio</title>
+<link rel="stylesheet" href="https://db.onlinewebfonts.com/c/a64ff11d2c24584c767f6257e880dc65?family=Helvetica+Regular" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #000; overflow: hidden; height: 100vh; width: 100vw;
+    font-family: 'Helvetica Regular', Helvetica, Arial, sans-serif;
+    color: #fff;
+  }
+  
+  /* === LAYOUT === */
+  #app {
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: #050508;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  /* Ambient gradient */
+  #ambient {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 30% 50%, rgba(59,130,246,0.03) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 30%, rgba(96,165,250,0.02) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  
+  /* === THREE-COLUMN LAYOUT === */
+  .column-left {
+    position: absolute; left: 24px; top: 50%; transform: translateY(-50%);
+    z-index: 10;
+    display: flex; align-items: center;
+  }
+  .column-center {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .column-right {
+    position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+    z-index: 10;
+    display: flex; align-items: center;
+  }
+  
+  /* === LIQUID GLASS === */
+  .glass {
+    background: rgba(255,255,255,0.01);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    border-radius: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .glass::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    padding: 1.2px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.12) 20%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.12) 80%, rgba(255,255,255,0.4) 100%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    pointer-events: none;
+  }
+  
+  /* === LEFT SIDEBAR === */
+  .left-panel {
+    width: 0; overflow: hidden;
+    transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+    opacity: 0;
+  }
+  .left-panel.open {
+    width: 200px; opacity: 1;
+  }
+  .left-panel-inner {
+    width: 200px; padding: 20px;
+  }
+  
+  .toggle-left {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; cursor: pointer;
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(4px);
+    border: none; color: rgba(255,255,255,0.3);
+    transition: all 0.2s; flex-shrink: 0;
+  }
+  .toggle-left:hover { color: rgba(255,255,255,0.6); transform: scale(1.05); }
+  .toggle-left:active { transform: scale(0.95); }
+  
+  .toggle-left .arrow { transition: transform 0.3s ease; display: block; }
+  .toggle-left .arrow.open { transform: rotate(180deg); }
+  
+  .left-handle {
+    width: 1px; height: 64px;
+    background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.1), transparent);
+    margin-left: 8px;
+  }
+  
+  /* === PLAYER CARD === */
+  .player-wrapper {
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+  }
+  
+  .album-art {
+    width: 240px; height: 240px; border-radius: 16px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.03), transparent);
+    border: 1px solid rgba(255,255,255,0.04);
+    position: relative; overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+  }
+  .album-art::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(59,130,246,0.05), transparent);
+  }
+  .album-art .center-label {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px;
+  }
+  .album-art .center-label span {
+    color: rgba(255,255,255,0.08); font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+  }
+  .album-art .center-label .line {
+    width: 32px; height: 1px; background: rgba(255,255,255,0.06);
+  }
+  
+  .track-title {
+    color: rgba(255,255,255,0.7); font-size: 15px; font-weight: 300;
+    letter-spacing: 0.5px; max-width: 280px; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .track-artist {
+    color: rgba(255,255,255,0.25); font-size: 12px; font-weight: 300;
+    margin-top: -16px; text-align: center;
+  }
+  
+  .progress-wrap {
+    width: 320px; max-width: 80vw;
+  }
+  .progress-track {
+    width: 100%; height: 2px; background: rgba(255,255,255,0.04);
+    border-radius: 1px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0%; background: rgba(59,130,246,0.25);
+    border-radius: 1px; transition: width 0.3s;
+  }
+  .progress-times {
+    display: flex; justify-content: space-between; margin-top: 4px;
+    color: rgba(255,255,255,0.15); font-size: 10px;
+  }
+  
+  .controls {
+    display: flex; align-items: center; gap: 20px;
+  }
+  .controls button {
+    background: none; border: none; color: rgba(255,255,255,0.25);
+    cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .controls button:hover { color: rgba(255,255,255,0.5); transform: scale(1.05); }
+  .controls button:active { transform: scale(0.95); }
+  .controls .play-btn {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.5);
+  }
+  .controls .play-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+  .controls .like-btn.active { color: #3b82f6; }
+  
+  /* === RIGHT AI BEAM === */
+  .ai-beam {
+    cursor: pointer; display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+    transition: all 0.3s;
+  }
+  .ai-beam .line {
+    width: 1px; height: 80px;
+    background: linear-gradient(to bottom, transparent, rgba(96,165,250,0.15), transparent);
+    transition: all 0.5s;
+  }
+  .ai-beam:hover .line {
+    background: linear-gradient(to bottom, transparent, rgba(96,165,250,0.35), transparent);
+  }
+  .ai-beam .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(96,165,250,0.35);
+    position: absolute; top: 50%; transform: translateY(-50%);
+    animation: breathe 3s ease-in-out infinite;
+    box-shadow: 0 0 6px rgba(96,165,250,0.2);
+    transition: all 0.5s;
+  }
+  .ai-beam:hover .dot {
+    background: rgba(96,165,250,0.6);
+    box-shadow: 0 0 12px rgba(96,165,250,0.4);
+  }
+  
+  @keyframes breathe {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 0.6; }
+  }
+  
+  /* === AI PANEL (expanded) === */
+  .ai-panel {
+    width: 0; overflow: hidden;
+    transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .ai-panel.open { width: 280px; }
+  .ai-panel-inner {
+    width: 280px; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .ai-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .ai-panel-header .status {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ai-panel-header .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;
+    animation: breathe 3s ease-in-out infinite;
+  }
+  .ai-panel-header .status-label {
+    color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .ai-panel-header .close-btn {
+    background: none; border: none; color: rgba(255,255,255,0.15);
+    cursor: pointer; font-size: 16px; transition: color 0.2s;
+  }
+  .ai-panel-header .close-btn:hover { color: rgba(255,255,255,0.4); }
+  
+  .ai-divider { height: 1px; background: linear-gradient(to right, transparent, rgba(255,255,255,0.08), transparent); }
+  
+  .chat-messages {
+    flex: 1; display: flex; flex-direction: column; gap: 12px;
+    min-height: 200px; max-height: 300px; overflow-y: auto;
+  }
+  .chat-messages .empty {
+    color: rgba(255,255,255,0.12); font-size: 11px; text-align: center; padding-top: 40px;
+  }
+  .chat-messages .msg .sender {
+    font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,0.15);
+    margin-bottom: 2px;
+  }
+  .chat-messages .msg .text {
+    font-size: 13px; line-height: 1.4;
+  }
+  .chat-messages .msg.ai .text { color: rgba(147, 197, 253, 0.6); }
+  .chat-messages .msg.user .text { color: rgba(255,255,255,0.45); }
+  
+  .chat-input-wrap {
+    display: flex; gap: 8px;
+  }
+  .chat-input-wrap input {
+    flex: 1; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 10px; padding: 8px 12px;
+    color: rgba(255,255,255,0.5); font-size: 13px;
+    outline: none; transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  .chat-input-wrap input::placeholder { color: rgba(255,255,255,0.1); }
+  .chat-input-wrap input:focus { border-color: rgba(255,255,255,0.15); }
+  .chat-input-wrap button {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: rgba(59,130,246,0.2);
+    border: none; color: rgba(255,255,255,0.4);
+    cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chat-input-wrap button:hover { background: rgba(59,130,246,0.35); transform: scale(1.05); }
+  
+  /* === VIEW TOGGLE (bottom) === */
+  .view-toggle {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 20;
+    display: flex; gap: 4px; padding: 4px;
+    border-radius: 24px;
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  .view-toggle button {
+    padding: 6px 20px; border-radius: 20px; border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.2); font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase; cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .view-toggle button.active { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
+  .view-toggle button:hover:not(.active) { color: rgba(255,255,255,0.4); }
+  
+  /* === IMMERSIVE VIEW === */
+  .vinyl {
+    width: 280px; height: 280px; border-radius: 50%;
+    background: linear-gradient(135deg, rgba(255,255,255,0.03), transparent);
+    border: 1px solid rgba(255,255,255,0.04);
+    display: flex; align-items: center; justify-content: center;
+    animation: spin-slow 8s linear infinite;
+    box-shadow: 0 30px 60px -15px rgba(0,0,0,0.6);
+  }
+  .vinyl-inner {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vinyl-inner .hole {
+    width: 12px; height: 12px; border-radius: 50%; background: rgba(255,255,255,0.15);
+  }
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  
+  .lyrics {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic; text-align: center;
+    pointer-events: none;
+  }
+  .lyrics .line {
+    font-size: 20px; line-height: 1.8; letter-spacing: 0.5px;
+    transition: all 0.6s ease;
+  }
+  .lyrics .line.past { color: rgba(255,255,255,0.04); }
+  .lyrics .line.current { color: rgba(255,255,255,0.25); }
+  .lyrics .line.future { color: rgba(255,255,255,0.06); }
+  .lyrics .line.empty { color: rgba(255,255,255,0.02); }
+  
+  .back-btn {
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: none; border: none;
+    color: rgba(255,255,255,0.15); font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    cursor: pointer; font-family: inherit;
+    transition: color 0.2s;
+  }
+  .back-btn:hover { color: rgba(255,255,255,0.4); }
+  
+  /* === VIEW TRANSITION === */
+  .view-radio, .view-immersive {
+    position: absolute; inset: 0;
+    transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .view-radio.hidden {
+    opacity: 0; transform: translateY(-10px); pointer-events: none;
+  }
+  .view-immersive.hidden {
+    opacity: 0; transform: translateY(10px); pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="ambient"></div>
+
+  <!-- ===== RADIO VIEW ===== -->
+  <div id="viewRadio" class="view-radio">
+    <!-- LEFT COLUMN -->
+    <div class="column-left">
+      <button class="toggle-left" id="toggleLeft" onclick="toggleLeftSidebar()">
+        <span class="arrow" id="leftArrow">▶</span>
+      </button>
+      <div class="left-panel" id="leftPanel">
+        <div class="left-panel-inner glass">
+          <div style="margin-bottom:16px">
+            <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.25);margin-bottom:8px">Weather</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:13px">22°C · Clear</div>
+          </div>
+          <div style="margin-bottom:16px">
+            <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.25);margin-bottom:8px">Listeners</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:13px">— — —</div>
+          </div>
+          <div>
+            <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.25);margin-bottom:8px">Now Playing</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:11px">Awaiting signal</div>
+          </div>
+          <div style="flex:1;min-height:40px"></div>
+          <div style="height:1px;background:linear-gradient(to right,transparent,rgba(255,255,255,0.06),transparent)"></div>
+        </div>
+      </div>
+      <div class="left-handle" id="leftHandle"></div>
+    </div>
+
+    <!-- CENTER COLUMN -->
+    <div class="column-center">
+      <div class="player-wrapper">
+        <div class="album-art">
+          <div class="center-label">
+            <span>AI Radio</span>
+            <div class="line"></div>
+          </div>
+        </div>
+        <div>
+          <div class="track-title">Await your voice</div>
+          <div class="track-artist">— — —</div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+          <div class="progress-times"><span>0:00</span><span>—:—</span></div>
+        </div>
+        <div class="controls">
+          <button onclick="">⏮</button>
+          <button class="play-btn" id="playBtn" onclick="togglePlay()">▶</button>
+          <button onclick="">⏭</button>
+          <button class="like-btn" id="likeBtn" onclick="toggleLike()">♡</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="column-right">
+      <div class="ai-panel" id="aiPanel">
+        <div class="ai-panel-inner glass">
+          <div class="ai-panel-header">
+            <div class="status">
+              <div class="status-dot"></div>
+              <span class="status-label">AI·DJ</span>
+            </div>
+            <button class="close-btn" onclick="toggleAIPanel()">✕</button>
+          </div>
+          <div class="ai-divider"></div>
+          <div class="chat-messages" id="chatMessages">
+            <div class="empty">◉ &nbsp;standing by</div>
+          </div>
+          <div class="chat-input-wrap">
+            <input type="text" placeholder="Request a song..." id="chatInput" onkeydown="if(event.key==='Enter')sendMessage()">
+            <button onclick="sendMessage()">→</button>
+          </div>
+        </div>
+      </div>
+      <div class="ai-beam" id="aiBeam" onclick="toggleAIPanel()">
+        <div style="position:relative;display:flex;flex-direction:column;align-items:center;height:80px;justify-content:center">
+          <div class="line"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== IMMERSIVE VIEW ===== -->
+  <div id="viewImmersive" class="view-immersive hidden">
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <div class="vinyl">
+        <div class="vinyl-inner">
+          <div class="hole"></div>
+        </div>
+      </div>
+    </div>
+    <div class="lyrics" id="lyricsContainer">
+      <div class="line empty">&nbsp;</div>
+      <div class="line empty">&nbsp;</div>
+      <div class="line current" style="color:rgba(255,255,255,0.2)">
+        awaiting your voice
+      </div>
+      <div class="line empty">&nbsp;</div>
+      <div class="line empty">&nbsp;</div>
+    </div>
+    <button class="back-btn" onclick="switchView('radio')">← Back to Radio</button>
+  </div>
+
+  <!-- VIEW TOGGLE -->
+  <div class="view-toggle">
+    <button class="active" id="tabRadio" onclick="switchView('radio')">Radio</button>
+    <button id="tabImmersive" onclick="switchView('immersive')">Immersive</button>
+  </div>
+</div>
+
+<script>
+// === STATE ===
+let currentView = 'radio';
+let leftOpen = false;
+let aiOpen = false;
+let isPlaying = false;
+let isLiked = false;
+
+// === LEFT SIDEBAR TOGGLE ===
+function toggleLeftSidebar() {
+  leftOpen = !leftOpen;
+  document.getElementById('leftPanel').classList.toggle('open', leftOpen);
+  document.getElementById('leftArrow').classList.toggle('open', leftOpen);
+  document.getElementById('leftHandle').style.display = leftOpen ? 'none' : 'block';
+}
+
+// === AI PANEL TOGGLE ===
+function toggleAIPanel() {
+  aiOpen = !aiOpen;
+  document.getElementById('aiPanel').classList.toggle('open', aiOpen);
+  document.getElementById('aiBeam').style.display = aiOpen ? 'none' : 'flex';
+}
+
+// === PLAYER ===
+function togglePlay() {
+  isPlaying = !isPlaying;
+  document.getElementById('playBtn').textContent = isPlaying ? '⏸' : '▶';
+}
+
+function toggleLike() {
+  isLiked = !isLiked;
+  const btn = document.getElementById('likeBtn');
+  btn.textContent = isLiked ? '♥' : '♡';
+  btn.classList.toggle('active', isLiked);
+}
+
+// === CHAT ===
+function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  
+  const container = document.getElementById('chatMessages');
+  // Remove empty state
+  const empty = container.querySelector('.empty');
+  if (empty) empty.remove();
+  
+  // User message
+  const userMsg = document.createElement('div');
+  userMsg.className = 'msg user';
+  userMsg.innerHTML = '<div class="sender">You</div><div class="text">' + text + '</div>';
+  container.appendChild(userMsg);
+  
+  // AI responds
+  setTimeout(() => {
+    const aiMsg = document.createElement('div');
+    aiMsg.className = 'msg ai';
+    aiMsg.innerHTML = '<div class="sender">AI·DJ</div><div class="text">Signal received. Processing...</div>';
+    container.appendChild(aiMsg);
+    container.scrollTop = container.scrollHeight;
+  }, 600);
+  
+  container.scrollTop = container.scrollHeight;
+}
+
+// === VIEW SWITCH ===
+function switchView(view) {
+  if (view === currentView) return;
+  currentView = view;
+  
+  const radio = document.getElementById('viewRadio');
+  const immersive = document.getElementById('viewImmersive');
+  const tabR = document.getElementById('tabRadio');
+  const tabI = document.getElementById('tabImmersive');
+  
+  if (view === 'radio') {
+    radio.classList.remove('hidden');
+    immersive.classList.add('hidden');
+    tabR.classList.add('active');
+    tabI.classList.remove('active');
+  } else {
+    radio.classList.add('hidden');
+    immersive.classList.remove('hidden');
+    tabR.classList.remove('active');
+    tabI.classList.add('active');
+  }
+}
+</script>
+</body>
+</html>

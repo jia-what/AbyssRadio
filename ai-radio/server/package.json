@@ -1,0 +1,22 @@
+{
+  "name": "abyss-radio-server",
+  "version": "1.0.0",
+  "description": "Abyss Radio API server",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test test/api.test.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "@meting/core": "^1.6.1",
+    "@neteasecloudmusicapienhanced/api": "^4.36.1",
+    "better-sqlite3": "^11.6.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "sql.js": "^1.14.1",
+    "sqlite3": "^6.0.1",
+    "ws": "^8.21.0"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"E:\\\\VM\\\\AI_audio\\\\ai-radio-v1\\\\node_modules\")",
+      "Bash(dir \"E:\\\\VM\\\\AI_audio\\\\ai-radio\\\\server\\\\node_modules\")",
+      "Bash(dir \"E:\\\\VM\\\\AI_audio\\\\ai-radio\\\\server\\\\.env\")",
+      "Bash(node -e \"import\\('./ncm.mjs'\\).then\\(m => console.log\\('ncm.mjs exports:', Object.keys\\(m\\)\\)\\)\")",
+      "Bash(start cmd *)",
+      "Bash(timeout 3)",
+      "Bash(curl -s http://localhost:4000/api/health)",
+      "Bash(ping -n 3 127.0.0.1)",
+      "Bash(curl -s \"http://localhost:4000/api/music/search?q=hello&source=both\")",
+      "Bash(ping -n 4 127.0.0.1)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:3000)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_take_screenshot",
+      "Bash(node node_modules\\\\vite\\\\bin\\\\vite.js build)",
+      "Bash(node -e \"console.log\\(require.resolve\\('vite'\\)\\)\")",
+      "Bash(node node_modules/vite/dist/node/cli.js build)",
+      "Bash(taskkill /f /im cmd.exe /t)",
+      "Bash(ping -n 2 127.0.0.1)",
+      "Bash(taskkill /f /im node.exe)",
+      "Bash(curl -s \"http://localhost:4000/api/music/search?q=周杰伦\")",
+      "Bash(taskkill /f /fi \"WINDOWTITLE eq Backend*\")",
+      "Bash(taskkill /f /fi \"WINDOWTITLE eq Abyss*\")",
+      "Bash(curl -s --max-time 15 \"http://localhost:4000/api/music/url?id=35847388&source=netease\")",
+      "Bash(node -e ' *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :4000)",
+      "Bash(taskkill /f /pid 33824)",
+      "Bash(start /B cmd /c \"cd /d E:\\\\VM\\\\AI_audio\\\\ai-radio\\\\server && node index.mjs\")",
+      "Bash(kill -9 33824)"
+    ]
+  }
+}
