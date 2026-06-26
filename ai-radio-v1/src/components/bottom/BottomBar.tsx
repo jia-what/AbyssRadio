@@ -86,7 +86,7 @@ export default function BottomBar({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0 }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pt-2"
+          className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pt-2 pointer-events-auto"
           onMouseEnter={onPin}
           onMouseLeave={onUnpin}
         >

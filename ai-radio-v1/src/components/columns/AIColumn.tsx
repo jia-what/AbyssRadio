@@ -50,7 +50,7 @@ export default function AIColumn({ visible, messages, onSendMessage, onPin, onUn
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed left-5 z-30"
+            className="fixed left-5 z-30 pointer-events-auto"
             style={{ perspective: '1000px', top: '12vh', height: '76vh' }}
             onMouseEnter={onPin}
             onMouseLeave={onUnpin}

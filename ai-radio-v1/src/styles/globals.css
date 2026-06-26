@@ -27,6 +27,11 @@
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+  z-index: 0;
+}
+.liquid-glass > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== Fade-up Animation ===== */

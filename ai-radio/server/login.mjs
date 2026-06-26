@@ -10,6 +10,7 @@ const loginQrCreate = require('@neteasecloudmusicapienhanced/api/module/login_qr
 const loginQrCheck = require('@neteasecloudmusicapienhanced/api/module/login_qr_check.js');
 const userPlaylist = require('@neteasecloudmusicapienhanced/api/module/user_playlist.js');
 const playlistDetail = require('@neteasecloudmusicapienhanced/api/module/playlist_detail.js');
+const songDetail = require('@neteasecloudmusicapienhanced/api/module/song_detail.js');
 const createRequest = require('@neteasecloudmusicapienhanced/api/util/request.js');
 
 // In-memory session store
@@ -83,6 +84,42 @@ export async function verifyNeteaseCookie(cookie) {
   };
 }
 
+function normalizeCoverUrl(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let u = raw.trim();
+  if (!u) return '';
+  if (u.startsWith('//')) u = 'https:' + u;
+  if (u.startsWith('http://')) u = 'https://' + u.slice(7);
+  return u;
+}
+
+function trackCover(t) {
+  const al = t.al || t.album;
+  if (!al) return '';
+  const raw = al.picUrl || (al.pic_str ? `https://p1.music.126.net/${al.pic_str}/${al.pic_str}.jpg` : '');
+  return normalizeCoverUrl(raw);
+}
+
+function playlistCover(p) {
+  return normalizeCoverUrl(p.coverImgUrl || p.coverImgUrl_str || p.picUrl || '');
+}
+
+/** Batch-fetch song/detail for ids missing album art (playlist_detail often omits al.picUrl). */
+async function fetchCoverMap(ids, cookie) {
+  const map = new Map();
+  const unique = [...new Set(ids.map(String))];
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await songDetail({ ids: chunk.join(','), cookie }, createRequest);
+    const songs = result?.body?.songs || [];
+    for (const s of songs) {
+      const cover = trackCover(s);
+      if (cover) map.set(String(s.id), cover);
+    }
+  }
+  return map;
+}
+
 /**
  * Get a user's playlists directly from a cookie string.
  */
@@ -93,7 +130,7 @@ export async function getNeteasePlaylistsByCookie(cookie) {
   const mapped = playlists.map(p => ({
     id: String(p.id),
     name: p.name,
-    cover: p.coverImgUrl || p.picUrl || p.coverImgUrl_str || '',
+    cover: playlistCover(p),
     trackCount: p.trackCount,
     playCount: p.playCount,
     description: p.description,
@@ -108,13 +145,21 @@ export async function getNeteasePlaylistsByCookie(cookie) {
  */
 export async function getNeteaseTracksByCookie(listId, cookie) {
   if (!cookie) throw new Error('缺少 Cookie');
-  const result = await playlistDetail({ id: listId, cookie, s: 0 }, createRequest);
-  const tracks = result?.body?.playlist?.tracks || [];
+  const result = await playlistDetail({ id: listId, cookie, s: 8 }, createRequest);
+  const playlist = result?.body?.playlist || {};
+  const tracks = playlist.tracks || [];
+  const fallbackCover = playlistCover(playlist);
+
+  const needIds = tracks
+    .filter(t => !trackCover(t))
+    .map(t => String(t.id));
+  const coverMap = needIds.length > 0 ? await fetchCoverMap(needIds, cookie) : new Map();
+
   const mapped = tracks.map(t => ({
     id: String(t.id),
     title: t.name,
     artist: (t.ar || t.artists || []).map(a => a.name).join(', '),
-    cover: t.al?.picUrl || t.album?.picUrl || t.al?.pic_str || '',
+    cover: trackCover(t) || coverMap.get(String(t.id)) || fallbackCover || '',
     duration: t.dt ? t.dt / 1000 : 0,
     source: 'netease',
   }));
@@ -159,7 +204,7 @@ export async function getPlaylistTracks(listId, key) {
     id: String(t.id),
     title: t.name,
     artist: (t.ar || []).map(a => a.name).join(', '),
-    cover: t.al?.picUrl || '',
+    cover: trackCover(t) || '',
     duration: t.dt ? t.dt / 1000 : 0,
     source: 'netease',
   }));

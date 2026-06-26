@@ -2,10 +2,15 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type PanelZone = 'left' | 'right' | 'bottom';
 
-const HIDE_DELAY_MS = 1000;
+const HIDE_DELAY_MS: Record<PanelZone, number> = {
+  left: 1000,
+  right: 0,
+  bottom: 1000,
+};
 const LEFT_EDGE = 40;
-const RIGHT_EDGE = 40;
 const BOTTOM_EDGE = 60;
+/** Once open, keep the playlist zone alive across the full panel width (not just the screen edge). */
+export const RIGHT_ZONE_WIDTH = 420;
 
 export interface EdgePanelState {
   left: boolean;
@@ -33,16 +38,19 @@ export function useEdgePanels() {
     setVisible(zone, true);
   }, [setVisible]);
 
-  // Start an independent countdown for this zone. If one is already running,
-  // leave it alone so mouse movement never resets another panel's timer.
   const scheduleHide = useCallback((zone: PanelZone) => {
     if (pinned.current[zone]) return;
     if (!visibleRef.current[zone]) return;
     if (timers.current[zone]) return;
+    const delay = HIDE_DELAY_MS[zone];
+    if (delay <= 0) {
+      setVisible(zone, false);
+      return;
+    }
     timers.current[zone] = setTimeout(() => {
       timers.current[zone] = undefined;
       setVisible(zone, false);
-    }, HIDE_DELAY_MS);
+    }, delay);
   }, [setVisible]);
 
   const pin = useCallback((zone: PanelZone) => {
@@ -52,7 +60,8 @@ export function useEdgePanels() {
 
   const unpin = useCallback((zone: PanelZone) => {
     pinned.current[zone] = false;
-    scheduleHide(zone);
+    // Right panel visibility is zone-driven; unpin only clears the pin latch.
+    if (zone !== 'right') scheduleHide(zone);
   }, [scheduleHide]);
 
   useEffect(() => {
@@ -63,8 +72,13 @@ export function useEdgePanels() {
       if (e.clientX < LEFT_EDGE) show('left');
       else if (!pinned.current.left) scheduleHide('left');
 
-      if (e.clientX > w - RIGHT_EDGE) show('right');
-      else if (!pinned.current.right) scheduleHide('right');
+      const inRightZone = e.clientX > w - RIGHT_ZONE_WIDTH;
+      if (inRightZone) {
+        show('right');
+      } else {
+        pinned.current.right = false;
+        scheduleHide('right');
+      }
 
       if (e.clientY > h - BOTTOM_EDGE) show('bottom');
       else if (!pinned.current.bottom) scheduleHide('bottom');

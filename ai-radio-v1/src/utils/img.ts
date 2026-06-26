@@ -8,6 +8,7 @@ function normalize(raw?: string | null): string {
   if (!raw) return '';
   let u = raw.trim();
   if (u.startsWith('//')) u = 'https:' + u;
+  if (u.startsWith('http://')) u = 'https://' + u.slice(7);
   return u;
 }
 

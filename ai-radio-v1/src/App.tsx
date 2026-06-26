@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import SpatialLayout from './components/layout/SpatialLayout';
-import BioParticles from './components/background/BioParticles';
 import PortalAnimation from './components/portal/PortalAnimation';
 import { useRadioState } from './hooks/useRadioState';
+import { useSpatialOrbit } from './hooks/useSpatialOrbit';
 
 export default function App() {
+  const [rightFocused, setRightFocused] = useState(false);
+  const { rotation, handlers } = useSpatialOrbit(!rightFocused);
   const {
     isPlaying, messages, togglePlay, playNext, playPrev, addChatMessage,
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
@@ -116,9 +119,16 @@ export default function App() {
           linear-gradient(180deg, rgba(5,5,10,1) 0%, rgba(8,8,20,1) 40%, rgba(10,10,25,1) 60%, rgba(5,5,10,1) 100%)
         `,
       }} />
-      {isPortaling ? <PortalAnimation onComplete={endPortal} /> : <BioParticles />}
-      <div className="relative w-full h-full">
+      {isPortaling && <PortalAnimation onComplete={endPortal} />}
+
+      <div
+        className="absolute inset-0 z-[2] touch-none cursor-grab active:cursor-grabbing"
+        {...handlers}
+      />
+
+      <div className="relative w-full h-full z-[3] pointer-events-none">
         <SpatialLayout
+          orbit={rotation}
           track={currentTrack}
           isPlaying={isPlaying}
           progress={progress}
@@ -139,6 +149,7 @@ export default function App() {
           onToggleMute={toggleMute}
           onSendMessage={handleSend}
           onPlayPlaylist={playPlaylist}
+          onRightFocusChange={setRightFocused}
         />
       </div>
     </div>

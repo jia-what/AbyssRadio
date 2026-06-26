@@ -1,6 +1,6 @@
 # Phase 2 交接简报（续接用）
 
-> 用途：上下文重置后，新会话先读本文件 + `README.md` + `docs/design/AI Radio — Experience & Design Vision.md` + `images/` 里的 3 张参考图，即可无缝接续 Phase 2。
+> **Phase 2 已完成**。接续 Phase 3 请读 `docs/design/PHASE-3-BRIEF.md`。
 
 ## 当前状态（基线）
 
@@ -25,8 +25,8 @@
 
 > 📷 参考图已存于仓库根目录 `images/`（直接读，无需用户重发）：
 > - `images/主屏幕样式.png` — 主屏：满屏封面粒子背景 + 居中歌词 + 右侧 3D 倾斜歌单卡片堆叠
-> - `images/鼠标歌单状态栏.png` — 悬停歌单时的放大状态
-> - `images/歌单展开后界面状态栏.png` — 点进歌单后歌曲展开的状态
+> - `images/右侧歌单状态栏.png` — 聚焦歌单时的放大卡片（播放歌单 / 详情按钮）+ 整屏倾斜聚焦效果
+> - `images/歌单展开后歌曲状态栏.png` — 点进歌单后歌曲列表展开的状态
 
 ### 主要改动文件
 - `ai-radio-v1/src/components/columns/PlaylistColumn.tsx`（核心：列表→3D 堆叠）
