@@ -16,6 +16,7 @@ alwaysApply: true
 根目录 `start.bat`（清 4000/3000 端口后同时拉起前后端）。后端 http://localhost:4000，前端 http://localhost:3000。
 
 ## 续接 / 路线（接新任务先读）
-- 阶段进度与下一步：`docs/design/PHASE-2-BRIEF.md`
+- 阶段进度与下一步：`docs/design/PHASE-4-BRIEF.md`
+- Phase 3 归档：`docs/design/PHASE-3-BRIEF.md`
 - 设计愿景：`docs/design/AI Radio — Experience & Design Vision.md`
 - 参考图：`images/`

@@ -4,7 +4,7 @@ import { useEdgePanels } from '../../hooks/useEdgePanels';
 import type { OrbitRotation } from '../../hooks/useSpatialOrbit';
 import LyricLight from '../center/LyricLight';
 import BottomBar from '../bottom/BottomBar';
-import AIColumn from '../columns/AIColumn';
+import SignalColumn from '../columns/SignalColumn';
 import PlaylistColumn from '../columns/PlaylistColumn';
 import type { Track } from '../../types';
 import type { LyricLine } from '../../utils/parseLRC';
@@ -102,9 +102,10 @@ export default function SpatialLayout(p: Props) {
           isPlaying={p.isPlaying}
         />
 
-        <AIColumn
+        <SignalColumn
           visible={panels.left}
           messages={p.messages}
+          isPlaying={p.isPlaying}
           onSendMessage={p.onSendMessage}
           onPin={() => pin('left')}
           onUnpin={() => unpin('left')}

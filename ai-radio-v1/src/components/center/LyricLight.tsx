@@ -28,8 +28,8 @@ export default function LyricLight({
 
   useEffect(() => {
     baseRef.current = { t: currentTime, at: performance.now() };
-    setSmoothTime(currentTime);
-  }, [currentTime]);
+    if (!isPlaying) setSmoothTime(currentTime);
+  }, [currentTime, isPlaying]);
 
   useEffect(() => {
     if (!isPlaying) return;

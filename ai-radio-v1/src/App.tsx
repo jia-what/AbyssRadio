@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import SpatialLayout from './components/layout/SpatialLayout';
 import PortalAnimation from './components/portal/PortalAnimation';
+import PulseBackdrop from './components/background/PulseBackdrop';
+import { PulseProvider } from './context/PulseContext';
 import { useRadioState } from './hooks/useRadioState';
 import { useSpatialOrbit } from './hooks/useSpatialOrbit';
 
@@ -11,7 +13,7 @@ export default function App() {
     isPlaying, messages, togglePlay, playNext, playPrev, addChatMessage,
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
-    trackLyrics, lyricIndex, lyricLines, realDuration,
+    trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, isDemoPlayback,
   } = useRadioState();
 
   const handleSend = async (text: string) => {
@@ -110,48 +112,54 @@ export default function App() {
 
   return (
     <div className="relative w-full h-screen bg-[#050508] overflow-hidden font-sans">
-      <div className="absolute inset-0" style={{
-        background: `
-          radial-gradient(ellipse 70% 40% at 50% 20%, rgba(59,130,246,0.05) 0%, transparent 60%),
-          radial-gradient(ellipse 50% 50% at 50% 60%, rgba(96,165,250,0.03) 0%, transparent 50%),
-          radial-gradient(ellipse 80% 30% at 30% 80%, rgba(59,130,246,0.02) 0%, transparent 50%),
-          radial-gradient(ellipse 80% 30% at 70% 80%, rgba(96,165,250,0.02) 0%, transparent 50%),
-          linear-gradient(180deg, rgba(5,5,10,1) 0%, rgba(8,8,20,1) 40%, rgba(10,10,25,1) 60%, rgba(5,5,10,1) 100%)
-        `,
-      }} />
-      {isPortaling && <PortalAnimation onComplete={endPortal} />}
+      <PulseProvider
+        audioRef={audioRef}
+        analyserRef={pulseAnalyserRef}
+        isPlaying={isPlaying}
+        isDemoPlayback={isDemoPlayback}
+        trackCover={currentTrack?.cover ?? null}
+        trackLabel={currentTrack ? `${currentTrack.title}` : null}
+      >
+        <div className="absolute inset-0" style={{
+          background: `
+            linear-gradient(180deg, rgba(5,5,10,1) 0%, rgba(8,8,20,1) 40%, rgba(10,10,25,1) 60%, rgba(5,5,10,1) 100%)
+          `,
+        }} />
+        <PulseBackdrop />
+        {isPortaling && <PortalAnimation onComplete={endPortal} />}
 
-      <div
-        className="absolute inset-0 z-[2] touch-none cursor-grab active:cursor-grabbing"
-        {...handlers}
-      />
-
-      <div className="relative w-full h-full z-[3] pointer-events-none">
-        <SpatialLayout
-          orbit={rotation}
-          track={currentTrack}
-          isPlaying={isPlaying}
-          progress={progress}
-          duration={duration}
-          realDuration={realDuration}
-          currentTime={currentTime}
-          volume={volume}
-          isMuted={isMuted}
-          trackLyrics={trackLyrics}
-          lyricIndex={lyricIndex}
-          lyricLines={lyricLines}
-          messages={messages}
-          onTogglePlay={togglePlay}
-          onNext={playNext}
-          onPrev={playPrev}
-          onSeek={seek}
-          onVolumeChange={setVolumeValue}
-          onToggleMute={toggleMute}
-          onSendMessage={handleSend}
-          onPlayPlaylist={playPlaylist}
-          onRightFocusChange={setRightFocused}
+        <div
+          className="absolute inset-0 z-[2] touch-none cursor-grab active:cursor-grabbing"
+          {...handlers}
         />
-      </div>
+
+        <div className="relative w-full h-full z-[3] pointer-events-none">
+          <SpatialLayout
+            orbit={rotation}
+            track={currentTrack}
+            isPlaying={isPlaying}
+            progress={progress}
+            duration={duration}
+            realDuration={realDuration}
+            currentTime={currentTime}
+            volume={volume}
+            isMuted={isMuted}
+            trackLyrics={trackLyrics}
+            lyricIndex={lyricIndex}
+            lyricLines={lyricLines}
+            messages={messages}
+            onTogglePlay={togglePlay}
+            onNext={playNext}
+            onPrev={playPrev}
+            onSeek={seek}
+            onVolumeChange={setVolumeValue}
+            onToggleMute={toggleMute}
+            onSendMessage={handleSend}
+            onPlayPlaylist={playPlaylist}
+            onRightFocusChange={setRightFocused}
+          />
+        </div>
+      </PulseProvider>
     </div>
   );
 }

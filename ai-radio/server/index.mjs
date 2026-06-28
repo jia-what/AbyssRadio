@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { Readable } from 'stream';
 import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric } from './ncm.mjs';
 import { getUrlNetease } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
@@ -88,6 +89,40 @@ app.get('/api/img', async function(req, res) {
     res.set('Cache-Control', 'public, max-age=86400');
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.end(buf);
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
+// Audio proxy — Referer + CORS so <audio> and Web Audio analyser can read the stream
+app.get('/api/audio', async function(req, res) {
+  const raw = req.query.url || '';
+  if (!raw || !/^https?:\/\//i.test(raw)) return res.status(400).end();
+  try {
+    const upstreamHeaders = {
+      'Referer': 'https://music.163.com/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    };
+    if (req.headers.range) upstreamHeaders['Range'] = req.headers.range;
+
+    const upstream = await fetch(raw, { headers: upstreamHeaders });
+    if (!upstream.ok && upstream.status !== 206) return res.status(upstream.status).end();
+
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Accept-Ranges', 'bytes');
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('Content-Type', ct);
+    const cr = upstream.headers.get('content-range');
+    if (cr) res.set('Content-Range', cr);
+    const cl = upstream.headers.get('content-length');
+    if (cl) res.set('Content-Length', cl);
+    res.status(upstream.status);
+
+    if (upstream.body) {
+      Readable.fromWeb(upstream.body).pipe(res);
+    } else {
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    }
   } catch (e) {
     res.status(502).end();
   }

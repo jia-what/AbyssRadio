@@ -62,6 +62,8 @@ export function useRadioState() {
   const [realDuration, setRealDuration] = useState(0); // actual audio duration from <audio>
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pulseAnalyserRef = useRef<AnalyserNode | null>(null);
+  const pulseCtxRef = useRef<AudioContext | null>(null);
   const isPlayingRef = useRef(false);
   const progressRef = useRef(0);
   const rafRef = useRef(0);
@@ -72,6 +74,7 @@ export function useRadioState() {
   const playNextRef = useRef<() => void>(() => {});
   const trackSourcesRef = useRef(trackSources);
   const sessionKeyRef = useRef<string>('');
+  const tickRef = useRef<(timestamp: number) => void>(() => {});
 
   useEffect(() => { playlistRef.current = playlist; }, [playlist]);
   useEffect(() => { trackIndexRef.current = currentTrackIndex; }, [currentTrackIndex]);
@@ -81,11 +84,41 @@ export function useRadioState() {
   const currentTrack = playlist[currentTrackIndex] ?? null;
   const duration = currentTrack?.duration ?? 0;
 
+  const clearAudioSrc = useCallback((audio: HTMLAudioElement) => {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+  }, []);
+
+  const resumePulseCtx = useCallback(() => {
+    void pulseCtxRef.current?.resume();
+  }, []);
+
   // ===== Audio element setup =====
   useEffect(() => {
     const audio = new Audio();
     audio.preload = 'auto';
+    audio.crossOrigin = 'anonymous';
     audioRef.current = audio;
+
+    // Standard visualizer tap: source → analyser → speakers (wired once, before any src).
+    try {
+      const ctx = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.55;
+
+      const source = ctx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+
+      pulseCtxRef.current = ctx;
+      pulseAnalyserRef.current = analyser;
+
+      audio.addEventListener('playing', () => { void ctx.resume(); });
+    } catch (err) {
+      console.warn('Pulse analyser unavailable:', err);
+    }
 
     audio.ontimeupdate = () => {
       if (audio.duration && audio.duration > 0 && audio.duration !== Infinity) {
@@ -122,6 +155,12 @@ export function useRadioState() {
 
     audio.onerror = () => {
       console.warn('Audio error, falling back to simulated playback');
+      clearAudioSrc(audio);
+      if (isPlayingRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        lastTickRef.current = 0;
+        rafRef.current = requestAnimationFrame(ts => tickRef.current(ts));
+      }
     };
 
     return () => {
@@ -129,59 +168,16 @@ export function useRadioState() {
       audio.pause();
       audio.src = '';
       audioRef.current = null;
+      pulseAnalyserRef.current = null;
+      void pulseCtxRef.current?.close();
+      pulseCtxRef.current = null;
     };
-  }, []);
+  }, [clearAudioSrc]);
 
   // Volume sync
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
   }, [volume, isMuted]);
-
-  // ===== Load and play a real audio track =====
-  const loadAndPlayTrack = useCallback(async (trackId: string, source: string, trackName?: string) => {
-    try {
-      const [url, lrcRaw] = await Promise.all([
-        getMusicUrl(trackId, source, trackName, sessionKeyRef.current),
-        getMusicLyric(trackId, source),
-      ]);
-
-      const parsed = parseLRC(lrcRaw);
-      setLyricLines(parsed);
-
-      const audio = audioRef.current;
-      if (url && audio) {
-        audio.src = url;
-        audio.currentTime = 0;
-        await audio.play();
-        // If audio.duration is known immediately, use it
-        if (audio.duration && audio.duration > 0 && audio.duration !== Infinity) {
-          setRealDuration(audio.duration);
-        }
-        setIsPlaying(true);
-        isPlayingRef.current = true;
-        progressRef.current = 0;
-        setProgress(0);
-      } else {
-        startSimulatedPlayback();
-      }
-    } catch {
-      startSimulatedPlayback();
-    }
-  }, []);
-
-  const startSimulatedPlayback = useCallback(() => {
-    isPlayingRef.current = true;
-    setIsPlaying(true);
-    setRealDuration(duration);
-    lastTickRef.current = 0;
-    rafRef.current = requestAnimationFrame(tick);
-  }, [duration]);
-
-  const stopSimulatedPlayback = useCallback(() => {
-    isPlayingRef.current = false;
-    setIsPlaying(false);
-    cancelAnimationFrame(rafRef.current);
-  }, []);
 
   const tick = useCallback((timestamp: number) => {
     if (!isPlayingRef.current) return;
@@ -205,16 +201,68 @@ export function useRadioState() {
     rafRef.current = requestAnimationFrame(tick);
   }, []);
 
+  useEffect(() => { tickRef.current = tick; }, [tick]);
+
+  const startSimulatedPlayback = useCallback(() => {
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+    setRealDuration(duration);
+    lastTickRef.current = 0;
+    rafRef.current = requestAnimationFrame(tick);
+  }, [duration, tick]);
+
+  const stopSimulatedPlayback = useCallback(() => {
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  // ===== Load and play a real audio track =====
+  const loadAndPlayTrack = useCallback(async (trackId: string, source: string, trackName?: string) => {
+    resumePulseCtx();
+    try {
+      const [url, lrcRaw] = await Promise.all([
+        getMusicUrl(trackId, source, trackName, sessionKeyRef.current),
+        getMusicLyric(trackId, source),
+      ]);
+
+      const parsed = parseLRC(lrcRaw);
+      setLyricLines(parsed);
+
+      const audio = audioRef.current;
+      if (url && audio) {
+        audio.src = url;
+        audio.currentTime = 0;
+        await audio.play();
+        if (audio.duration && audio.duration > 0 && audio.duration !== Infinity) {
+          setRealDuration(audio.duration);
+        }
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+        progressRef.current = 0;
+        setProgress(0);
+      } else {
+        startSimulatedPlayback();
+      }
+    } catch (err) {
+      console.warn('loadAndPlayTrack failed:', err);
+      const audio = audioRef.current;
+      if (audio) clearAudioSrc(audio);
+      startSimulatedPlayback();
+    }
+  }, [startSimulatedPlayback, clearAudioSrc, resumePulseCtx]);
+
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.src) {
-      if (audio.paused) { audio.play(); setIsPlaying(true); isPlayingRef.current = true; }
+      resumePulseCtx();
+      if (audio.paused) { void audio.play(); setIsPlaying(true); isPlayingRef.current = true; }
       else { audio.pause(); setIsPlaying(false); isPlayingRef.current = false; }
     } else {
       if (isPlayingRef.current) stopSimulatedPlayback();
       else startSimulatedPlayback();
     }
-  }, [startSimulatedPlayback, stopSimulatedPlayback]);
+  }, [startSimulatedPlayback, stopSimulatedPlayback, resumePulseCtx]);
 
   // Keep playNextRef in sync so audio.onended always calls latest
   const playNext = useCallback(() => {
@@ -413,6 +461,9 @@ export function useRadioState() {
     isPlaying, messages, isPortaling,
     currentTrack, playlist, progress, currentTime, duration, volume, isMuted,
     trackLyrics, lyricIndex, lyricLines, realDuration: displayDuration,
+    isDemoPlayback: isPlaying && !!currentTrack && !trackSources[currentTrack.id],
+    audioRef,
+    pulseAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
     requestSong, searchAndPlay, playPlaylist,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),

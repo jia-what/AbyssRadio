@@ -40,13 +40,15 @@ export async function getMusicUrl(
   keyword?: string,
   sessionKey?: string
 ): Promise<string | null> {
-  let url = `/api/music/url-smart?id=${encodeURIComponent(id)}&sources=${encodeURIComponent(source)},kugou,kuwo`;
-  if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
-  if (sessionKey) url += `&key=${encodeURIComponent(sessionKey)}`;
-  const res = await fetch(url);
+  let apiUrl = `/api/music/url-smart?id=${encodeURIComponent(id)}&sources=${encodeURIComponent(source)},kugou,kuwo`;
+  if (keyword) apiUrl += `&q=${encodeURIComponent(keyword)}`;
+  if (sessionKey) apiUrl += `&key=${encodeURIComponent(sessionKey)}`;
+  const res = await fetch(apiUrl);
   if (!res.ok) return null;
   const data = await res.json();
-  return data.url ?? null;
+  const streamUrl = data.url ?? null;
+  if (!streamUrl) return null;
+  return `/api/audio?url=${encodeURIComponent(streamUrl)}`;
 }
 
 /**

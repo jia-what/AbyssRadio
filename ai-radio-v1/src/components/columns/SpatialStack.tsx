@@ -47,6 +47,9 @@ export default function SpatialStack<T extends StackItem>({
   const lastStep = useRef(0);
   const activeRef = useRef(activeIndex);
   activeRef.current = activeIndex;
+  const onFocusItemRef = useRef(onFocusItem);
+  onFocusItemRef.current = onFocusItem;
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const step = useCallback(
     (dir: number) => {
@@ -56,33 +59,39 @@ export default function SpatialStack<T extends StackItem>({
     [items.length, onActiveChange],
   );
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const now = performance.now();
       accum.current += e.deltaY;
       if (now - lastStep.current < WHEEL_COOLDOWN) return;
       if (Math.abs(accum.current) >= WHEEL_THRESHOLD) {
-        step(accum.current > 0 ? 1 : -1);
+        stepRef.current(accum.current > 0 ? 1 : -1);
         accum.current = 0;
         lastStep.current = now;
       }
-    },
-    [step],
-  );
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   // Reset the accumulator and notify the PULSE hook when focus changes.
   useEffect(() => {
     accum.current = 0;
     const item = items[activeIndex];
-    if (item && onFocusItem) onFocusItem(item);
-  }, [activeIndex, items, onFocusItem]);
+    if (item && onFocusItemRef.current) onFocusItemRef.current(item);
+  }, [activeIndex, items]);
 
   return (
     <div
+      ref={containerRef}
       className={`relative w-full h-full overflow-hidden ${className}`}
       style={{ transformStyle: 'preserve-3d' }}
-      onWheel={onWheel}
     >
       {items.map((item, i) => {
         const offset = i - activeIndex;
