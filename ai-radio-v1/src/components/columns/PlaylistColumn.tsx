@@ -7,7 +7,6 @@ import {
   type Platform, type Playlist, type PlaylistTrack, type BindResult,
 } from '../../services/playlistApi';
 import CoverThumb from '../ui/CoverThumb';
-import { usePulseFocus } from '../../context/PulseContext';
 import SpatialStack, { type StackCardState } from './SpatialStack';
 
 interface Props {
@@ -23,7 +22,6 @@ type View = 'bind' | 'playlists' | 'tracks';
 const sourceLabel = (source?: string) => (source === 'kugou' ? 'KG' : 'NE');
 
 export default function PlaylistColumn({ visible, focused = false, onPlayPlaylist, onFocus, onBlur }: Props) {
-  const { setStackFocus } = usePulseFocus();
   const [bind, setBind] = useState<BindResult | null>(null);
   const [view, setView] = useState<View>('bind');
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -96,15 +94,6 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
     setView('bind');
   };
 
-  const handlePlaylistFocus = useCallback((pl: Playlist) => {
-    setStackFocus(pl.cover, pl.name);
-  }, [setStackFocus]);
-
-  const handleTrackFocus = useCallback((t: PlaylistTrack) => {
-    setStackFocus(t.cover, `${t.title} · ${t.artist}`);
-  }, [setStackFocus]);
-
-  // Fetch the tracks of a playlist (shared by "详情" and "播放歌单").
   const loadTracks = useCallback(async (pl: Playlist): Promise<PlaylistTrack[]> => {
     if (!bind) return [];
     setLoading(true);
@@ -375,7 +364,6 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               onActiveChange={setPlActive}
                               renderCard={renderPlaylistCard}
                               gap={96}
-                              onFocusItem={handlePlaylistFocus}
                             />
                           )}
                         </motion.div>
@@ -404,7 +392,6 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               onActiveChange={setTrkActive}
                               renderCard={renderTrackCard}
                               gap={62}
-                              onFocusItem={handleTrackFocus}
                             />
                           )}
                         </motion.div>

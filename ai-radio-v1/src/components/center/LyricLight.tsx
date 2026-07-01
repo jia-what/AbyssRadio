@@ -65,25 +65,32 @@ export default function LyricLight({
   }
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[5]">
-      <div className="text-center max-w-4xl px-8 md:px-16 w-full">
+    <div className="text-center w-full">
         {hasLyrics ? (
           <div className="flex flex-col items-center justify-center gap-5">
             <AnimatePresence mode="popLayout" initial={false}>
               {windowLines.map(({ idx, dist }) => (
                 <motion.div
                   key={idx}
-                  layout
-                  initial={{ opacity: 0, y: 22 }}
-                  animate={{ opacity: dist === 0 ? 1 : 0.22, y: 0 }}
-                  exit={{ opacity: 0, y: -22 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: dist === 0 ? 1 : 0.22 }}
+                  exit={{ opacity: 0 }}
                   transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                   className={
                     dist === 0
                       ? 'text-[clamp(22px,4.4vw,46px)] font-bold leading-tight tracking-tight'
                       : 'text-[clamp(13px,1.9vw,20px)] font-medium text-white/70 leading-snug'
                   }
-                  style={dist === 0 ? { textShadow: '0 0 50px rgba(96,165,250,0.18), 0 2px 24px rgba(0,0,0,0.6)' } : undefined}
+                  style={dist === 0 ? {
+                    textShadow: [
+                      '0 1px 0 rgba(255,255,255,0.35)',
+                      '0 2px 0 rgba(200,220,255,0.22)',
+                      '0 3px 0 rgba(150,190,255,0.14)',
+                      '0 0 40px rgba(143,233,255,0.28)',
+                      '0 0 80px rgba(96,165,250,0.16)',
+                      '0 4px 24px rgba(0,0,0,0.55)',
+                    ].join(', '),
+                  } : undefined}
                 >
                   {dist === 0 ? <CharFill text={trackLyrics[idx]} progress={charProgress} /> : trackLyrics[idx]}
                 </motion.div>
@@ -108,7 +115,6 @@ export default function LyricLight({
             </div>
           </motion.div>
         )}
-      </div>
     </div>
   );
 }

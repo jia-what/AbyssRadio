@@ -1,24 +1,26 @@
-import { createContext, useContext, useCallback, useMemo, useState, useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { useSyncExternalStore } from 'react';
 import { usePulseAnalysis, type PulseBands, IDLE_BANDS } from '../hooks/usePulse';
+import { BeatPulseRefProvider } from './BeatPulseContext';
+import { IDLE_PULSE, type BeatPulseSnapshot, beatPulseToGlow, beatPulseToScale } from '../utils/beatPulse';
 
 export type { PulseBands };
 
 export interface PulseFocus {
+  trackId: string | null;
   cover: string | null;
   label?: string;
-  source: 'track' | 'stack';
+  source: 'track';
 }
 
 interface PulseStore {
   subscribe: (cb: () => void) => () => void;
   getSnapshot: () => PulseBands;
+  getFrameSnapshot: () => PulseBands;
 }
 
 interface PulseFocusContextValue {
   focus: PulseFocus;
-  setStackFocus: (cover: string, label?: string) => void;
-  clearStackFocus: () => void;
 }
 
 const PulseFocusContext = createContext<PulseFocusContextValue | null>(null);
@@ -26,6 +28,7 @@ const PulseStoreContext = createContext<PulseStore | null>(null);
 
 function createPulseStore(): PulseStore {
   let snapshot = IDLE_BANDS;
+  let frameSnapshot = IDLE_BANDS;
   const listeners = new Set<() => void>();
   return {
     subscribe(cb) {
@@ -35,73 +38,97 @@ function createPulseStore(): PulseStore {
     getSnapshot() {
       return snapshot;
     },
+    getFrameSnapshot() {
+      return frameSnapshot;
+    },
     /** @internal */
     publish(next: PulseBands) {
       snapshot = next;
       listeners.forEach(l => l());
     },
-  } as PulseStore & { publish: (next: PulseBands) => void };
+    /** @internal — 60fps beat/onset path */
+    publishFrame(next: PulseBands) {
+      frameSnapshot = next;
+    },
+  } as PulseStore & { publish: (next: PulseBands) => void; publishFrame: (next: PulseBands) => void };
 }
 
 interface Props {
   audioRef: RefObject<HTMLAudioElement | null>;
   analyserRef: RefObject<AnalyserNode | null>;
+  beatAnalyserRef: RefObject<AnalyserNode | null>;
   isPlaying: boolean;
   isDemoPlayback: boolean;
   trackCover: string | null;
+  trackId: string | null;
   trackLabel: string | null;
   children: ReactNode;
 }
 
+function BeatPulseDriver({ children }: { children: ReactNode }) {
+  const store = useContext(PulseStoreContext);
+  const pulseRef = useRef<BeatPulseSnapshot>(IDLE_PULSE);
+
+  useEffect(() => {
+    if (!store) return;
+    let raf = 0;
+    const tick = () => {
+      const beat = store.getFrameSnapshot().beat;
+      const weight = store.getFrameSnapshot().beatWeight;
+      pulseRef.current = {
+        kick: beat,
+        flash: beatPulseToGlow(beat) * (0.55 + weight * 0.45),
+        scale: beatPulseToScale(beat),
+      };
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [store]);
+
+  return <BeatPulseRefProvider value={pulseRef}>{children}</BeatPulseRefProvider>;
+}
+
+/** Cover focus follows the playing track only — not playlist scroll preview. */
 export function PulseProvider({
   audioRef,
   analyserRef,
+  beatAnalyserRef,
   isPlaying,
   isDemoPlayback,
   trackCover,
+  trackId,
   trackLabel,
   children,
 }: Props) {
-  const storeRef = useRef<(PulseStore & { publish: (b: PulseBands) => void }) | null>(null);
-  if (!storeRef.current) storeRef.current = createPulseStore() as PulseStore & { publish: (b: PulseBands) => void };
+  const storeRef = useRef<(PulseStore & { publish: (b: PulseBands) => void; publishFrame: (b: PulseBands) => void }) | null>(null);
+  if (!storeRef.current) storeRef.current = createPulseStore() as PulseStore & { publish: (b: PulseBands) => void; publishFrame: (b: PulseBands) => void };
 
-  usePulseAnalysis(audioRef, analyserRef, isPlaying, isDemoPlayback, storeRef.current.publish);
-
-  const [stackFocus, setStackFocusState] = useState<PulseFocus | null>(null);
-
-  useEffect(() => {
-    setStackFocusState(null);
-  }, [trackCover]);
-
-  const setStackFocus = useCallback((cover: string, label?: string) => {
-    setStackFocusState(prev => {
-      if (prev?.cover === cover && prev?.label === label) return prev;
-      return { cover, label, source: 'stack' };
-    });
-  }, []);
-
-  const clearStackFocus = useCallback(() => {
-    setStackFocusState(null);
-  }, []);
-
-  const focus: PulseFocus = useMemo(() => {
-    if (stackFocus) return stackFocus;
-    return {
-      cover: trackCover,
-      label: trackLabel ?? undefined,
-      source: 'track',
-    };
-  }, [stackFocus, trackCover, trackLabel]);
-
-  const focusValue = useMemo(
-    () => ({ focus, setStackFocus, clearStackFocus }),
-    [focus, setStackFocus, clearStackFocus],
+  usePulseAnalysis(
+    audioRef,
+    analyserRef,
+    beatAnalyserRef,
+    isPlaying,
+    isDemoPlayback,
+    storeRef.current.publish,
+    storeRef.current.publishFrame,
   );
+
+  const focus: PulseFocus = useMemo(() => ({
+    trackId,
+    cover: trackCover,
+    label: trackLabel ?? undefined,
+    source: 'track',
+  }), [trackId, trackCover, trackLabel]);
+
+  const focusValue = useMemo(() => ({ focus }), [focus]);
 
   return (
     <PulseStoreContext.Provider value={storeRef.current}>
       <PulseFocusContext.Provider value={focusValue}>
-        {children}
+        <BeatPulseDriver>
+          {children}
+        </BeatPulseDriver>
       </PulseFocusContext.Provider>
     </PulseStoreContext.Provider>
   );

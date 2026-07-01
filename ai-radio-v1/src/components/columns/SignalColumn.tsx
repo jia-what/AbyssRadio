@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Send, Radio } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { usePulseBands, usePulseFocus } from '../../context/PulseContext';
+import type { OrbitRotation } from '../../hooks/useSpatialOrbit';
 import CoverThumb from '../ui/CoverThumb';
 import type { AIMessage } from '../layout/SpatialLayout';
 
@@ -12,18 +13,31 @@ interface Props {
   onSendMessage: (text: string) => void;
   onPin: () => void;
   onUnpin: () => void;
+  parallax?: OrbitRotation;
 }
 
 const BAR_COUNT = 12;
 
+/** Sidebar meters — gamma expands quiet/loud contrast so bars rarely peg at 100%. */
+function signalMeter(v: number, gamma = 1.42) {
+  const x = Math.max(0, Math.min(1, v));
+  return 0.06 + Math.pow(x, gamma) * 0.88;
+}
+
 function SignalBars() {
   const bands = usePulseBands();
   const heights = useMemo(() => {
-    const base = [bands.bass, bands.mid, bands.treble];
+    const b = signalMeter(bands.bass, 1.35);
+    const m = signalMeter(bands.mid, 1.48);
+    const t = signalMeter(bands.treble, 1.62);
+    const e = signalMeter(bands.energy, 1.25);
+    const beat = signalMeter(bands.beat, 1.1);
     return Array.from({ length: BAR_COUNT }, (_, i) => {
-      const band = base[i % 3];
-      const phase = Math.sin(i * 0.7) * 0.15;
-      return Math.min(1, (band * 1.35 + bands.energy * 0.15) * (0.55 + (i / BAR_COUNT) * 0.45) + phase * band + bands.beat * 0.35);
+      const band = i < 4 ? b : i < 8 ? m : t;
+      const sway = 0.78 + (i % 4) * 0.06;
+      const ripple = Math.sin(i * 0.9 + beat * 8) * 0.07 * band;
+      const kick = beat * (i % 4 === 0 ? 0.22 : 0.06);
+      return Math.min(0.94, band * sway + ripple + e * 0.1 + kick);
     });
   }, [bands]);
 
@@ -34,8 +48,8 @@ function SignalBars() {
           key={i}
           className="w-[3px] rounded-full bg-blue-400/40 origin-bottom"
           animate={{
-            scaleY: 0.12 + h * 0.88,
-            opacity: 0.25 + h * 0.55,
+            scaleY: 0.1 + h * 0.82,
+            opacity: 0.22 + h * 0.48,
           }}
           transition={{ duration: 0.12, ease: 'easeOut' }}
           style={{ height: 28 }}
@@ -59,6 +73,7 @@ export default function SignalColumn({
   onSendMessage,
   onPin,
   onUnpin,
+  parallax = { x: 0, y: 0 },
 }: Props) {
   const [input, setInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -106,14 +121,20 @@ export default function SignalColumn({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed left-5 z-30 pointer-events-auto"
-            style={{ perspective: '1000px', top: '12vh', height: '76vh' }}
+            className="fixed left-6 z-30 pointer-events-auto overflow-visible"
+            style={{ top: '10vh', height: '80vh', maxHeight: '720px' }}
             onMouseEnter={onPin}
             onMouseLeave={onUnpin}
           >
-            <div
-              className="w-[320px] h-full liquid-glass rounded-2xl p-5 flex flex-col"
-              style={{ transform: 'rotateY(8deg)', transformOrigin: 'left center' }}
+            <motion.div
+              className="w-[min(320px,calc(100vw-2rem))] h-full liquid-glass rounded-2xl p-5 flex flex-col overflow-hidden"
+              style={{ transformOrigin: 'left center' }}
+              animate={{
+                rotateY: 6,
+                x: parallax.y * 0.08,
+                y: parallax.x * 0.06,
+              }}
+              transition={{ type: 'spring', stiffness: 170, damping: 26, mass: 0.85 }}
             >
               {/* Header — signal lock + spectrum */}
               <div className="flex items-center justify-between mb-3 shrink-0">
@@ -146,7 +167,7 @@ export default function SignalColumn({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-white/25 text-[9px] tracking-[1.5px] uppercase">
-                      {focus.source === 'stack' ? 'Preview' : 'Locked'}
+                      Locked
                     </div>
                     {focus.label && (
                       <div className="text-white/45 text-[11px] truncate">{focus.label}</div>
@@ -197,18 +218,22 @@ export default function SignalColumn({
 
               {/* Band readout */}
               <div className="flex items-center gap-3 mb-3 shrink-0 px-0.5">
-                {(['bass', 'mid', 'treble'] as const).map(band => (
+                {(['bass', 'mid', 'treble'] as const).map(band => {
+                  const gamma = band === 'treble' ? 1.55 : band === 'mid' ? 1.45 : 1.38;
+                  const level = signalMeter(bands[band], gamma);
+                  return (
                   <div key={band} className="flex-1">
                     <div className="text-[8px] tracking-[1px] uppercase text-white/15 mb-1">{band}</div>
                     <div className="h-[2px] bg-white/[0.04] rounded-full overflow-hidden">
                       <motion.div
                         className="h-full bg-blue-400/50 rounded-full origin-left"
-                        animate={{ scaleX: bands[band] }}
-                        transition={{ duration: 0.12, ease: 'easeOut' }}
+                        animate={{ scaleX: level }}
+                        transition={{ duration: 0.14, ease: 'easeOut' }}
                       />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mb-3 shrink-0" />
@@ -230,7 +255,7 @@ export default function SignalColumn({
                   <Send size={13} />
                 </button>
               </div>
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

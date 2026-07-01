@@ -63,6 +63,8 @@ export function useRadioState() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pulseAnalyserRef = useRef<AnalyserNode | null>(null);
+  const beatAnalyserRef = useRef<AnalyserNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const pulseCtxRef = useRef<AudioContext | null>(null);
   const isPlayingRef = useRef(false);
   const progressRef = useRef(0);
@@ -74,6 +76,8 @@ export function useRadioState() {
   const playNextRef = useRef<() => void>(() => {});
   const trackSourcesRef = useRef(trackSources);
   const sessionKeyRef = useRef<string>('');
+  const loadGenRef = useRef(0);
+  const lastAdvanceRef = useRef(0);
   const tickRef = useRef<(timestamp: number) => void>(() => {});
 
   useEffect(() => { playlistRef.current = playlist; }, [playlist]);
@@ -101,19 +105,28 @@ export function useRadioState() {
     audio.crossOrigin = 'anonymous';
     audioRef.current = audio;
 
-    // Standard visualizer tap: source → analyser → speakers (wired once, before any src).
+    // Main analyser (smooth bands) + beat analyser (sharp kick) — Mineradio wiring.
     try {
       const ctx = new AudioContext();
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.55;
+      const beatAnalyser = ctx.createAnalyser();
+      const gainNode = ctx.createGain();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.58;
+      beatAnalyser.fftSize = 2048;
+      beatAnalyser.smoothingTimeConstant = 0.1;
 
       const source = ctx.createMediaElementSource(audio);
       source.connect(analyser);
-      analyser.connect(ctx.destination);
+      source.connect(beatAnalyser);
+      analyser.connect(gainNode);
+      gainNode.connect(ctx.destination);
 
       pulseCtxRef.current = ctx;
       pulseAnalyserRef.current = analyser;
+      beatAnalyserRef.current = beatAnalyser;
+      gainNodeRef.current = gainNode;
+      gainNode.gain.value = volume;
 
       audio.addEventListener('playing', () => { void ctx.resume(); });
     } catch (err) {
@@ -169,14 +182,18 @@ export function useRadioState() {
       audio.src = '';
       audioRef.current = null;
       pulseAnalyserRef.current = null;
+      beatAnalyserRef.current = null;
+      gainNodeRef.current = null;
       void pulseCtxRef.current?.close();
       pulseCtxRef.current = null;
     };
   }, [clearAudioSrc]);
 
-  // Volume sync
+  // Volume via GainNode — audio.volume is ignored once MediaElementSource is wired.
   useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
+    const gain = gainNodeRef.current;
+    if (gain) gain.gain.value = isMuted ? 0 : volume;
+    if (audioRef.current) audioRef.current.volume = 1;
   }, [volume, isMuted]);
 
   const tick = useCallback((timestamp: number) => {
@@ -219,6 +236,7 @@ export function useRadioState() {
 
   // ===== Load and play a real audio track =====
   const loadAndPlayTrack = useCallback(async (trackId: string, source: string, trackName?: string) => {
+    const gen = ++loadGenRef.current;
     resumePulseCtx();
     try {
       const [url, lrcRaw] = await Promise.all([
@@ -226,14 +244,25 @@ export function useRadioState() {
         getMusicLyric(trackId, source),
       ]);
 
+      if (gen !== loadGenRef.current) return;
+
+      const tracks = playlistRef.current;
+      const idx = trackIndexRef.current;
+      if (tracks[idx]?.id !== trackId) return;
+
       const parsed = parseLRC(lrcRaw);
       setLyricLines(parsed);
 
       const audio = audioRef.current;
       if (url && audio) {
+        if (gen !== loadGenRef.current) return;
         audio.src = url;
         audio.currentTime = 0;
         await audio.play();
+        if (gen !== loadGenRef.current) {
+          audio.pause();
+          return;
+        }
         if (audio.duration && audio.duration > 0 && audio.duration !== Infinity) {
           setRealDuration(audio.duration);
         }
@@ -242,9 +271,11 @@ export function useRadioState() {
         progressRef.current = 0;
         setProgress(0);
       } else {
+        if (gen !== loadGenRef.current) return;
         startSimulatedPlayback();
       }
     } catch (err) {
+      if (gen !== loadGenRef.current) return;
       console.warn('loadAndPlayTrack failed:', err);
       const audio = audioRef.current;
       if (audio) clearAudioSrc(audio);
@@ -266,12 +297,19 @@ export function useRadioState() {
 
   // Keep playNextRef in sync so audio.onended always calls latest
   const playNext = useCallback(() => {
+    const now = Date.now();
+    if (now - lastAdvanceRef.current < 600) return;
+    lastAdvanceRef.current = now;
+
     cancelAnimationFrame(rafRef.current);
+    loadGenRef.current += 1;
     const tracks = playlistRef.current;
     const nextIndex = (trackIndexRef.current + 1) % tracks.length;
     trackIndexRef.current = nextIndex;
     setCurrentTrackIndex(nextIndex);
     setRealDuration(0);
+    progressRef.current = 0;
+    setProgress(0);
     const nextTrack = tracks[nextIndex];
     if (nextTrack && trackSourcesRef.current[nextTrack.id]) {
       const audio = audioRef.current;
@@ -288,16 +326,20 @@ export function useRadioState() {
   useEffect(() => { playNextRef.current = playNext; }, [playNext]);
 
   const playPrev = useCallback(() => {
+    lastAdvanceRef.current = Date.now();
     cancelAnimationFrame(rafRef.current);
+    loadGenRef.current += 1;
     const tracks = playlistRef.current;
     const prevIndex = (trackIndexRef.current - 1 + tracks.length) % tracks.length;
     trackIndexRef.current = prevIndex;
     setCurrentTrackIndex(prevIndex);
     setRealDuration(0);
+    progressRef.current = 0;
+    setProgress(0);
     const prevTrack = tracks[prevIndex];
     if (prevTrack && trackSourcesRef.current[prevTrack.id]) {
       const audio = audioRef.current;
-      if (audio) audio.pause();
+      if (audio) { audio.pause(); audio.src = ''; }
       loadAndPlayTrack(prevTrack.id, trackSourcesRef.current[prevTrack.id], `${prevTrack.title} ${prevTrack.artist}`);
     } else {
       const audio = audioRef.current;
@@ -356,6 +398,7 @@ export function useRadioState() {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
       cancelAnimationFrame(rafRef.current);
+      loadGenRef.current += 1;
       trackIndexRef.current = 0;
       setCurrentTrackIndex(0);
       progressRef.current = 0; setProgress(0);
@@ -386,6 +429,7 @@ export function useRadioState() {
     tracks.forEach(t => { sources[t.id] = t.source || 'netease'; });
 
     cancelAnimationFrame(rafRef.current);
+    loadGenRef.current += 1;
     const audio = audioRef.current;
     if (audio) { audio.pause(); audio.src = ''; }
 
@@ -415,10 +459,12 @@ export function useRadioState() {
     trackIndexRef.current = idx;
     setCurrentTrackIndex(idx);
     setRealDuration(0);
+    progressRef.current = 0;
+    setProgress(0);
     const track = tracks[idx];
     if (track && trackSources[track.id]) {
       const audio = audioRef.current;
-      if (audio) audio.pause();
+      if (audio) { audio.pause(); audio.src = ''; }
       loadAndPlayTrack(track.id, trackSources[track.id]);
     } else {
       const audio = audioRef.current;
@@ -464,6 +510,7 @@ export function useRadioState() {
     isDemoPlayback: isPlaying && !!currentTrack && !trackSources[currentTrack.id],
     audioRef,
     pulseAnalyserRef,
+    beatAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
     requestSong, searchAndPlay, playPlaylist,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),

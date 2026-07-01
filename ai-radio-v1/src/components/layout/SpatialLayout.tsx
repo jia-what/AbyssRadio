@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useEdgePanels } from '../../hooks/useEdgePanels';
 import type { OrbitRotation } from '../../hooks/useSpatialOrbit';
 import LyricLight from '../center/LyricLight';
+import LyricStage from '../center/LyricStage';
 import BottomBar from '../bottom/BottomBar';
 import SignalColumn from '../columns/SignalColumn';
 import PlaylistColumn from '../columns/PlaylistColumn';
+import type { ParticleCameraState } from '../background/coverParticle/camera';
 import type { Track } from '../../types';
 import type { LyricLine } from '../../utils/parseLRC';
 import type { PlaylistTrack } from '../../services/playlistApi';
@@ -26,6 +28,7 @@ interface Props {
   lyricLines: LyricLine[];
   messages: AIMessage[];
   orbit: OrbitRotation;
+  cameraRef: RefObject<ParticleCameraState>;
   onTogglePlay: () => void;
   onNext: () => void;
   onPrev: () => void;
@@ -84,13 +87,8 @@ export default function SpatialLayout(p: Props) {
   };
 
   return (
-    <div className="relative w-full h-full pointer-events-none" style={{ transformStyle: 'preserve-3d' }}>
-      {/* Universe layer — lyrics + side panels orbit with the scene */}
-      <motion.div
-        className="absolute inset-0 pointer-events-none"
-        animate={stageParallax(p.orbit, rightFocused)}
-        transition={STAGE_SPRING}
-      >
+    <div className="relative w-full h-full pointer-events-none">
+      <LyricStage cameraRef={p.cameraRef} dimmed={rightFocused}>
         <LyricLight
           track={p.track}
           trackLyrics={p.trackLyrics}
@@ -101,16 +99,24 @@ export default function SpatialLayout(p: Props) {
           duration={p.duration}
           isPlaying={p.isPlaying}
         />
+      </LyricStage>
 
-        <SignalColumn
-          visible={panels.left}
-          messages={p.messages}
-          isPlaying={p.isPlaying}
-          onSendMessage={p.onSendMessage}
-          onPin={() => pin('left')}
-          onUnpin={() => unpin('left')}
-        />
+      {/* HUD — fixed to viewport; must stay outside orbit parallax (transform clips fixed children). */}
+      <SignalColumn
+        visible={panels.left}
+        messages={p.messages}
+        isPlaying={p.isPlaying}
+        onSendMessage={p.onSendMessage}
+        onPin={() => pin('left')}
+        onUnpin={() => unpin('left')}
+        parallax={p.orbit}
+      />
 
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        animate={stageParallax(p.orbit, rightFocused)}
+        transition={STAGE_SPRING}
+      >
         <BottomBar
           visible={panels.bottom}
           track={p.track}
@@ -151,7 +157,7 @@ export default function SpatialLayout(p: Props) {
             className="fixed top-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
           >
             <div className="liquid-glass rounded-full px-4 py-1.5 text-[10px] text-white/30 tracking-wide">
-              拖拽平移视角 · 控制条贴边浮出
+              滚轮缩放 · WASD 转向 · 双击回正 · 控制条贴边浮出
             </div>
           </motion.div>
         )}

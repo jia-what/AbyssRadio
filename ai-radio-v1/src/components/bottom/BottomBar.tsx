@@ -33,14 +33,29 @@ export default function BottomBar({
   const [isDragging, setIsDragging] = useState(false);
   const [localProgress, setLocalProgress] = useState(progress);
   const [volHover, setVolHover] = useState(false);
+  const [isVolDragging, setIsVolDragging] = useState(false);
+  const [snapProgress, setSnapProgress] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeBarRef = useRef<HTMLDivElement>(null);
+  const trackIdRef = useRef(track?.id);
 
   const displayDur = realDuration || duration || 1;
   const vol = isMuted ? 0 : volume;
   const displayProgress = isDragging ? localProgress : progress;
 
-  useEffect(() => { if (!isDragging) setLocalProgress(progress); }, [progress, isDragging]);
+  useEffect(() => {
+    if (!isDragging) setLocalProgress(progress);
+  }, [progress, isDragging]);
+
+  // Instant reset when track changes — no width transition from previous song.
+  useEffect(() => {
+    if (track?.id === trackIdRef.current) return;
+    trackIdRef.current = track?.id;
+    setLocalProgress(0);
+    setSnapProgress(true);
+    const t = window.setTimeout(() => setSnapProgress(false), 80);
+    return () => window.clearTimeout(t);
+  }, [track?.id]);
 
   const calcProgressPct = useCallback((clientX: number) => {
     if (!progressRef.current) return 0;
@@ -48,35 +63,107 @@ export default function BottomBar({
     return Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
   }, []);
 
+  const beginSeek = useCallback((clientX: number) => {
+    setLocalProgress(calcProgressPct(clientX));
+    setIsDragging(true);
+    setSnapProgress(true);
+  }, [calcProgressPct]);
+
   const handleProgressDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setLocalProgress(calcProgressPct(e.clientX));
-    setIsDragging(true);
-  }, [calcProgressPct]);
+    beginSeek(e.clientX);
+  }, [beginSeek]);
+
+  const handleProgressTouch = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    e.preventDefault();
+    beginSeek(touch.clientX);
+  }, [beginSeek]);
 
   useEffect(() => {
     if (!isDragging) return;
-    const onMove = (e: MouseEvent) => setLocalProgress(calcProgressPct(e.clientX));
-    const onUp = (e: MouseEvent) => { onSeek(calcProgressPct(e.clientX)); setIsDragging(false); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    const onMove = (clientX: number) => setLocalProgress(calcProgressPct(clientX));
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientX);
+    const onTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (touch) onMove(touch.clientX);
+    };
+    const finish = (clientX: number) => {
+      onSeek(calcProgressPct(clientX));
+      setIsDragging(false);
+      setSnapProgress(false);
+    };
+    const onMouseUp = (e: MouseEvent) => finish(e.clientX);
+    const onTouchEnd = (e: TouchEvent) => {
+      const touch = e.changedTouches[0];
+      if (touch) finish(touch.clientX);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
   }, [isDragging, calcProgressPct, onSeek]);
 
-  const calcVolPct = useCallback((clientY: number) => {
+  const calcVolPct = useCallback((clientX: number) => {
     if (!volumeBarRef.current) return 0;
     const rect = volumeBarRef.current.getBoundingClientRect();
-    return Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height));
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   }, []);
+
+  const beginVolumeAdjust = useCallback((clientX: number) => {
+    onVolumeChange(calcVolPct(clientX));
+    setIsVolDragging(true);
+  }, [calcVolPct, onVolumeChange]);
 
   const handleVolumeDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    onVolumeChange(calcVolPct(e.clientY));
-  }, [calcVolPct, onVolumeChange]);
+    e.stopPropagation();
+    beginVolumeAdjust(e.clientX);
+  }, [beginVolumeAdjust]);
+
+  const handleVolumeTouch = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    e.preventDefault();
+    beginVolumeAdjust(touch.clientX);
+  }, [beginVolumeAdjust]);
+
+  useEffect(() => {
+    if (!isVolDragging) return;
+    const onMove = (clientX: number) => onVolumeChange(calcVolPct(clientX));
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientX);
+    const onTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (touch) onMove(touch.clientX);
+    };
+    const onMouseUp = () => setIsVolDragging(false);
+    const onTouchEnd = () => setIsVolDragging(false);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [isVolDragging, calcVolPct, onVolumeChange]);
 
   const coverStyle = isImageUrl(track?.cover)
     ? { backgroundImage: `url(${coverUrl(track?.cover)})` }
     : { background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(10,10,26,0.8))' };
+
+  const fillTransition = snapProgress || isDragging
+    ? 'none'
+    : 'width 120ms linear';
 
   return (
     <AnimatePresence>
@@ -86,29 +173,45 @@ export default function BottomBar({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0 }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pt-2 pointer-events-auto"
+          className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pointer-events-auto flex flex-col gap-2.5"
           onMouseEnter={onPin}
           onMouseLeave={onUnpin}
         >
-          {/* Progress line on top edge */}
+          {/* Progress — above the pill, in normal flow */}
           <div
             ref={progressRef}
-            className="absolute top-0 left-4 right-4 h-[2px] cursor-pointer group/progress"
+            className="w-full h-5 flex items-center shrink-0 cursor-pointer touch-none group/progress"
             onMouseDown={handleProgressDown}
+            onTouchStart={handleProgressTouch}
+            role="slider"
+            aria-label="播放进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(displayProgress)}
           >
-            <div className="h-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <div className="relative w-full h-[3px] rounded-full overflow-visible" style={{ background: 'rgba(255,255,255,0.06)' }}>
               <div
-                className="h-full transition-all duration-150"
+                className="h-full rounded-full"
                 style={{
                   width: `${displayProgress}%`,
-                  background: 'linear-gradient(90deg, rgba(96,165,250,0.5), rgba(139,92,246,0.6))',
+                  background: 'linear-gradient(90deg, rgba(96,165,250,0.55), rgba(139,92,246,0.65))',
+                  transition: fillTransition,
+                }}
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none transition-opacity duration-150"
+                style={{
+                  left: `calc(${displayProgress}% - 5px)`,
+                  background: 'rgba(200,220,255,0.85)',
+                  boxShadow: '0 0 8px rgba(96,165,250,0.45)',
+                  opacity: isDragging ? 1 : 0,
                 }}
               />
             </div>
           </div>
 
           <div
-            className="mx-auto max-w-4xl liquid-glass rounded-full px-5 py-3 flex items-center gap-4"
+            className="mx-auto max-w-4xl w-full liquid-glass rounded-full px-5 py-3 flex items-center gap-4 shrink-0"
             style={{ backdropFilter: 'blur(12px)' }}
           >
             {/* Track info */}
@@ -151,22 +254,39 @@ export default function BottomBar({
                 onMouseEnter={() => setVolHover(true)}
                 onMouseLeave={() => setVolHover(false)}
               >
-                <button onClick={onToggleMute} className="text-white/25 hover:text-white/50 transition-colors duration-500">
+                <button
+                  type="button"
+                  onClick={onToggleMute}
+                  className="text-white/25 hover:text-white/50 transition-colors duration-500 shrink-0"
+                >
                   {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
                 </button>
                 <div
                   ref={volumeBarRef}
-                  className="relative h-5 w-0.5 rounded-full cursor-pointer"
-                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                  className="relative w-14 h-5 flex items-center cursor-pointer touch-none rounded-full"
+                  style={{ background: 'rgba(255,255,255,0.06)' }}
                   onMouseDown={handleVolumeDown}
+                  onTouchStart={handleVolumeTouch}
+                  role="slider"
+                  aria-label="音量"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(vol * 100)}
                 >
                   <div
-                    className="absolute bottom-0 w-full rounded-full transition-all duration-300"
-                    style={{ height: `${vol * 100}%`, background: 'rgba(150,200,255,0.35)' }}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 h-[3px] rounded-full transition-all duration-150"
+                    style={{
+                      width: `${vol * 100}%`,
+                      background: 'rgba(150,200,255,0.45)',
+                    }}
                   />
                   <div
-                    className={`absolute left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-white/40 transition-opacity duration-300 pointer-events-none ${volHover ? 'opacity-100' : 'opacity-0'}`}
-                    style={{ bottom: `calc(${vol * 100}% - 3px)` }}
+                    className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none transition-opacity duration-150"
+                    style={{
+                      left: `calc(${vol * 100}% - 4px)`,
+                      background: 'rgba(200,220,255,0.85)',
+                      opacity: isVolDragging || volHover ? 1 : 0,
+                    }}
                   />
                 </div>
               </div>
