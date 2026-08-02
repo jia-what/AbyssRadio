@@ -1,10 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Play, Disc3, ListMusic } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ChevronLeft, Play, Disc3, ListMusic, RefreshCw } from 'lucide-react';
 import {
-  bindCookie, fetchPlaylists, fetchPlaylistTracks,
+  fetchPlaylists, fetchPlaylistTracks,
   loadStoredBind, saveStoredBind, clearStoredBind,
-  type Platform, type Playlist, type PlaylistTrack, type BindResult,
+  fetchQrKey, fetchQrImage, checkQrLogin,
+  type Platform, type Playlist, type PlaylistTrack, type BindResult, type QrPollCode,
 } from '../../services/playlistApi';
 import CoverThumb from '../ui/CoverThumb';
 import SpatialStack, { type StackCardState } from './SpatialStack';
@@ -15,13 +16,14 @@ interface Props {
   onPlayPlaylist: (tracks: PlaylistTrack[], startIndex: number, sessionKey: string) => void;
   onFocus: () => void;
   onBlur: () => void;
+  onToggle?: () => void;
 }
 
 type View = 'bind' | 'playlists' | 'tracks';
 
 const sourceLabel = (source?: string) => (source === 'kugou' ? 'KG' : 'NE');
 
-export default function PlaylistColumn({ visible, focused = false, onPlayPlaylist, onFocus, onBlur }: Props) {
+export default function PlaylistColumn({ visible, focused = false, onPlayPlaylist, onFocus, onBlur, onToggle }: Props) {
   const [bind, setBind] = useState<BindResult | null>(null);
   const [view, setView] = useState<View>('bind');
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -32,9 +34,15 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // bind form
+  // bind / QR login
   const [platform, setPlatform] = useState<Platform>('netease');
-  const [cookieInput, setCookieInput] = useState('');
+  const [qrImg, setQrImg] = useState('');
+  const [qrCode, setQrCode] = useState<QrPollCode>(801);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollGenRef = useRef(0);
+  const loggedInRef = useRef(false);
+  /** Avoid duplicate QR sessions (StrictMode / effect re-runs). */
+  const qrActivePlatformRef = useRef<Platform | null>(null);
 
   const loadPlaylists = useCallback(async (key: string) => {
     setLoading(true);
@@ -52,46 +60,120 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
     }
   }, []);
 
-  // Auto re-bind on mount from stored cookie
+  const stopQrPoll = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const startQrLogin = useCallback(async (pf: Platform) => {
+    stopQrPoll();
+    loggedInRef.current = false;
+    const pollGen = ++pollGenRef.current;
+    setQrImg('');
+    setQrCode(801);
+    setError('');
+    onFocus(); // pin panel — user will look at phone to confirm login
+    try {
+      const keyData = await fetchQrKey(pf);
+      if (pollGen !== pollGenRef.current) return;
+      const qrData = await fetchQrImage(pf, keyData.key);
+      if (pollGen !== pollGenRef.current) return;
+      setQrImg(qrData.qrimg);
+      pollRef.current = setInterval(async () => {
+        if (loggedInRef.current || pollGen !== pollGenRef.current) return;
+        try {
+          const check = await checkQrLogin(pf, keyData.key);
+          if (loggedInRef.current || pollGen !== pollGenRef.current) return;
+          setQrCode(check.code);
+          if (check.code === 200 && check.key) {
+            loggedInRef.current = true;
+            stopQrPoll();
+            // Keep qrActivePlatformRef set — prevents useEffect from spawning a new QR
+            const result: BindResult = {
+              key: check.key,
+              platform: check.platform || pf,
+              user: check.user || { userId: '', nickname: pf === 'kugou' ? '酷狗用户' : '网易云用户' },
+            };
+            setBind(result);
+            saveStoredBind(result.platform, result.key, result.user);
+            setView('playlists');
+            await loadPlaylists(result.key);
+          } else if (check.code === 800 && !loggedInRef.current) {
+            stopQrPoll();
+            setError('二维码已过期，请点击下方刷新');
+          } else if (check.code === 801 && check.message?.includes('频繁')) {
+            setError('请求过于频繁，请稍候…');
+          }
+        } catch (e) {
+          if (loggedInRef.current || pollGen !== pollGenRef.current) return;
+          stopQrPoll();
+          setError(e instanceof Error ? e.message : '登录失败，请点击刷新重试');
+        }
+      }, 3000);
+    } catch (e) {
+      if (pollGen !== pollGenRef.current) return;
+      setError(e instanceof Error ? e.message : '获取二维码失败');
+    }
+  }, [loadPlaylists, stopQrPoll, onFocus]);
+
+  useEffect(() => () => stopQrPoll(), [stopQrPoll]);
+
+  // Auto-restore session from localStorage (server restart requires re-scan)
   useEffect(() => {
     const stored = loadStoredBind();
     if (!stored) return;
     setPlatform(stored.platform);
     (async () => {
       try {
-        const result = await bindCookie(stored.platform, stored.cookie);
-        setBind(result);
-        await loadPlaylists(result.key);
+        const lists = await fetchPlaylists(stored.sessionKey);
+        setBind({
+          key: stored.sessionKey,
+          platform: stored.platform,
+          user: stored.user || { userId: '', nickname: '已登录' },
+        });
+        setPlaylists(lists);
+        setPlActive(0);
+        setView('playlists');
       } catch {
         clearStoredBind();
       }
     })();
-  }, [loadPlaylists]);
+  }, []);
 
-  const handleBind = async () => {
-    if (!cookieInput.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const result = await bindCookie(platform, cookieInput.trim());
-      setBind(result);
-      saveStoredBind(platform, cookieInput.trim());
-      setCookieInput('');
-      await loadPlaylists(result.key);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '绑定失败');
-    } finally {
-      setLoading(false);
+  // Only start QR when user opens the playlist panel (avoid hammering NetEase on page load)
+  useEffect(() => {
+    if (view !== 'bind' || bind) {
+      stopQrPoll();
+      qrActivePlatformRef.current = null;
+      return;
     }
-  };
+    if (!visible) return;
+    if (qrActivePlatformRef.current === platform) return;
+
+    qrActivePlatformRef.current = platform;
+    startQrLogin(platform);
+  }, [view, platform, bind, visible, startQrLogin, stopQrPoll]);
 
   const handleUnbind = () => {
+    stopQrPoll();
+    qrActivePlatformRef.current = null;
     clearStoredBind();
     setBind(null);
     setPlaylists([]);
     setTracks([]);
     setActivePlaylist(null);
     setView('bind');
+  };
+
+  const qrStatusText = () => {
+    if (qrCode === 803) return '请在手机上确认登录';
+    if (qrCode === 802) return '已扫码，请在手机上确认';
+    if (qrCode === 801) return '请用对应 App 扫描二维码';
+    if (qrCode === 800) return '二维码已过期';
+    if (qrCode === 200) return '登录成功，正在加载歌单…';
+    return '请用对应 App 扫描二维码';
   };
 
   const loadTracks = useCallback(async (pl: Playlist): Promise<PlaylistTrack[]> => {
@@ -218,15 +300,18 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
     <>
       <AnimatePresence>
         {!visible && (
-          <motion.div
+          <motion.button
+            type="button"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.8 }}
-            className="fixed right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none"
+            onClick={onToggle}
+            className="fixed right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-auto w-6 h-16 bg-transparent border-0 cursor-pointer"
+            aria-label="打开歌单"
           >
             <div className="w-px h-12 bg-gradient-to-b from-transparent via-white/10 to-transparent ml-auto" />
-          </motion.div>
+          </motion.button>
         )}
       </AnimatePresence>
 
@@ -236,7 +321,7 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
             className="playlist-hud fixed right-0 top-0 bottom-0 z-40 flex justify-end items-center pointer-events-auto"
             style={{ width: 'min(420px, 38vw)' }}
             onMouseEnter={onFocus}
-            onMouseLeave={onBlur}
+            onMouseLeave={() => { if (view !== 'bind') onBlur(); }}
           >
             {/* Soft left fade — blends into the universe instead of a hard black edge */}
             <div
@@ -264,17 +349,20 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
             <div className="w-full h-full flex flex-col" style={{ transformStyle: 'preserve-3d' }}>
               {/* ===== Bind view ===== */}
               {view === 'bind' && (
-                <div className="liquid-glass rounded-2xl p-5 flex flex-col h-full">
-                  <div className="flex items-center gap-2 mb-5">
+                <div className="liquid-glass rounded-2xl p-5 flex flex-col h-full items-center">
+                  <div className="flex items-center gap-2 mb-5 self-start w-full">
                     <Disc3 size={16} className="text-white/30" />
-                    <span className="text-white/40 text-[10px] tracking-[2px] uppercase">绑定账号</span>
+                    <span className="text-white/40 text-[10px] tracking-[2px] uppercase">扫码登录</span>
                   </div>
 
-                  <div className="flex gap-2 mb-4">
+                  <div className="flex gap-2 mb-5 self-start w-full">
                     {(['netease', 'kugou'] as Platform[]).map(pf => (
                       <button
                         key={pf}
-                        onClick={() => setPlatform(pf)}
+                        onClick={() => {
+                          qrActivePlatformRef.current = null;
+                          setPlatform(pf);
+                        }}
                         className={`text-[11px] px-3 py-1.5 rounded-lg transition-colors duration-300 ${
                           platform === pf
                             ? 'text-blue-300/80 bg-blue-500/10'
@@ -282,30 +370,54 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                         }`}
                       >
                         {pf === 'netease' ? '网易云' : '酷狗'}
-                        {pf === 'kugou' && <span className="ml-1 text-white/20">备选</span>}
                       </button>
                     ))}
                   </div>
 
-                  <textarea
-                    value={cookieInput}
-                    onChange={e => setCookieInput(e.target.value)}
-                    placeholder={`粘贴${platform === 'netease' ? '网易云' : '酷狗'} Cookie...`}
-                    className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-white/55 text-xs leading-relaxed placeholder:text-white/15 focus:outline-none focus:border-white/20 transition-colors duration-300 resize-none mb-3"
-                  />
+                  <div className="flex-1 flex flex-col items-center justify-center min-h-0 w-full">
+                    {qrImg ? (
+                      <div className="relative mb-4">
+                        <img
+                          src={qrImg}
+                          alt="登录二维码"
+                          className="w-40 h-40 rounded-xl bg-white p-2"
+                        />
+                        {qrCode === 802 && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl">
+                            <span className="text-white/80 text-xs">已扫码</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="w-40 h-40 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mb-4">
+                        <span className="text-white/20 text-xs">加载中...</span>
+                      </div>
+                    )}
 
-                  {error && <div className="text-red-300/60 text-[11px] mb-3 leading-relaxed">{error}</div>}
+                    <p className="text-white/35 text-[11px] text-center leading-relaxed mb-3">
+                      {qrStatusText()}
+                    </p>
 
-                  <button
-                    onClick={handleBind}
-                    disabled={loading || !cookieInput.trim()}
-                    className="text-[11px] tracking-[2px] uppercase text-white/55 hover:text-white/80 border border-white/[0.1] rounded-full px-4 py-2.5 transition-colors duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    {loading ? '绑定中...' : '绑定'}
-                  </button>
+                    {error && (
+                      <div className="text-red-300/60 text-[11px] mb-3 text-center leading-relaxed">{error}</div>
+                    )}
 
-                  <div className="text-white/15 text-[10px] leading-relaxed mt-4">
-                    浏览器登录后 F12 → 网络请求 → 复制 Cookie。仅保存在本地。
+                    <button
+                      onClick={() => {
+                        qrActivePlatformRef.current = null;
+                        startQrLogin(platform);
+                      }}
+                      className="flex items-center gap-1.5 text-[10px] tracking-wide text-white/35 hover:text-white/60 transition-colors duration-300"
+                    >
+                      <RefreshCw size={12} />
+                      刷新二维码
+                    </button>
+                  </div>
+
+                  <div className="text-white/15 text-[10px] leading-relaxed mt-4 text-center">
+                    {platform === 'kugou'
+                      ? '打开酷狗音乐 App 扫码，登录后自动加载歌单'
+                      : '打开网易云音乐 App 扫码，登录后自动加载歌单'}
                   </div>
                 </div>
               )}
@@ -363,7 +475,9 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               activeIndex={plActive}
                               onActiveChange={setPlActive}
                               renderCard={renderPlaylistCard}
-                              gap={96}
+                              gap={88}
+                              wheelThreshold={55}
+                              wheelCooldown={110}
                             />
                           )}
                         </motion.div>
@@ -391,7 +505,9 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               activeIndex={trkActive}
                               onActiveChange={setTrkActive}
                               renderCard={renderTrackCard}
-                              gap={62}
+                              gap={58}
+                              wheelThreshold={48}
+                              wheelCooldown={90}
                             />
                           )}
                         </motion.div>

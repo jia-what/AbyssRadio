@@ -63,9 +63,13 @@ function stageParallax(orbit: OrbitRotation, rightFocused: boolean) {
 }
 
 export default function SpatialLayout(p: Props) {
-  const { panels, pin, unpin } = useEdgePanels();
+  const { panels, pin, unpin, toggle } = useEdgePanels();
   const [showHint, setShowHint] = useState(true);
   const [rightFocused, setRightFocused] = useState(false);
+
+  useEffect(() => {
+    pin('bottom');
+  }, [pin]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowHint(false), 4000);
@@ -86,6 +90,16 @@ export default function SpatialLayout(p: Props) {
     unpin('right');
   };
 
+  const toggleLeft = () => toggle('left');
+
+  const toggleRight = () => {
+    if (rightFocused || panels.right) {
+      handleRightBlur();
+    } else {
+      handleRightFocus();
+    }
+  };
+
   return (
     <div className="relative w-full h-full pointer-events-none">
       <LyricStage cameraRef={p.cameraRef} dimmed={rightFocused}>
@@ -101,6 +115,28 @@ export default function SpatialLayout(p: Props) {
         />
       </LyricStage>
 
+      {/* Corner toggles — AI / playlist tucked away until asked */}
+      {!panels.left && (
+        <button
+          type="button"
+          onClick={toggleLeft}
+          className="fixed left-4 bottom-28 z-40 pointer-events-auto text-[10px] tracking-[0.2em] uppercase text-white/25 hover:text-white/55 transition-colors duration-500"
+          aria-label="打开 AI"
+        >
+          AI
+        </button>
+      )}
+      {!panels.right && (
+        <button
+          type="button"
+          onClick={toggleRight}
+          className="fixed right-4 bottom-28 z-40 pointer-events-auto text-[10px] tracking-[0.2em] uppercase text-white/25 hover:text-white/55 transition-colors duration-500"
+          aria-label="打开歌单"
+        >
+          歌单
+        </button>
+      )}
+
       {/* HUD — fixed to viewport; must stay outside orbit parallax (transform clips fixed children). */}
       <SignalColumn
         visible={panels.left}
@@ -109,6 +145,7 @@ export default function SpatialLayout(p: Props) {
         onSendMessage={p.onSendMessage}
         onPin={() => pin('left')}
         onUnpin={() => unpin('left')}
+        onToggle={toggleLeft}
         parallax={p.orbit}
       />
 
@@ -145,6 +182,7 @@ export default function SpatialLayout(p: Props) {
         onPlayPlaylist={p.onPlayPlaylist}
         onFocus={handleRightFocus}
         onBlur={handleRightBlur}
+        onToggle={toggleRight}
       />
 
       <AnimatePresence>
@@ -157,7 +195,7 @@ export default function SpatialLayout(p: Props) {
             className="fixed top-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
           >
             <div className="liquid-glass rounded-full px-4 py-1.5 text-[10px] text-white/30 tracking-wide">
-              滚轮缩放 · WASD 转向 · 双击回正 · 控制条贴边浮出
+              AI Radio · 有 AI 陪聊的听歌空间 · 角落唤出 AI / 歌单
             </div>
           </motion.div>
         )}

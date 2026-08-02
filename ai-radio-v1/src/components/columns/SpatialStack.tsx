@@ -19,6 +19,10 @@ interface SpatialStackProps<T extends StackItem> {
   renderCard: (item: T, state: StackCardState) => ReactNode;
   /** vertical distance (px) between adjacent card centers */
   gap?: number;
+  /** wheel delta needed per step (lower = faster scroll) */
+  wheelThreshold?: number;
+  /** ms between wheel steps */
+  wheelCooldown?: number;
   /** how many neighbours to render on each side of the focused card */
   visible?: number;
   className?: string;
@@ -30,8 +34,8 @@ interface SpatialStackProps<T extends StackItem> {
   onFocusItem?: (item: T) => void;
 }
 
-const WHEEL_THRESHOLD = 70; // accumulate this much delta before stepping (magnetic feel)
-const WHEEL_COOLDOWN = 200; // ms between steps so one flick = one card
+const DEFAULT_WHEEL_THRESHOLD = 50;
+const DEFAULT_WHEEL_COOLDOWN = 100;
 
 export default function SpatialStack<T extends StackItem>({
   items,
@@ -39,6 +43,8 @@ export default function SpatialStack<T extends StackItem>({
   onActiveChange,
   renderCard,
   gap = 90,
+  wheelThreshold = DEFAULT_WHEEL_THRESHOLD,
+  wheelCooldown = DEFAULT_WHEEL_COOLDOWN,
   visible = 3,
   className = '',
   onFocusItem,
@@ -53,7 +59,7 @@ export default function SpatialStack<T extends StackItem>({
 
   const step = useCallback(
     (dir: number) => {
-      const next = Math.max(0, Math.min(items.length - 1, activeRef.current + dir));
+      const next = Math.max(0, Math.min(items.length - 1, activeRef.current + (dir > 0 ? 1 : -1)));
       if (next !== activeRef.current) onActiveChange(next);
     },
     [items.length, onActiveChange],
@@ -69,8 +75,8 @@ export default function SpatialStack<T extends StackItem>({
       e.preventDefault();
       const now = performance.now();
       accum.current += e.deltaY;
-      if (now - lastStep.current < WHEEL_COOLDOWN) return;
-      if (Math.abs(accum.current) >= WHEEL_THRESHOLD) {
+      if (now - lastStep.current < wheelCooldown) return;
+      if (Math.abs(accum.current) >= wheelThreshold) {
         stepRef.current(accum.current > 0 ? 1 : -1);
         accum.current = 0;
         lastStep.current = now;
@@ -78,7 +84,7 @@ export default function SpatialStack<T extends StackItem>({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [wheelThreshold, wheelCooldown]);
 
   // Reset the accumulator and notify the PULSE hook when focus changes.
   useEffect(() => {

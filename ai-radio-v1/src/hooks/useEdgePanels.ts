@@ -7,7 +7,6 @@ const HIDE_DELAY_MS: Record<PanelZone, number> = {
   right: 0,
   bottom: 1000,
 };
-const LEFT_EDGE = 40;
 const BOTTOM_EDGE = 60;
 /** Once open, keep the playlist zone alive across the full panel width (not just the screen edge). */
 export const RIGHT_ZONE_WIDTH = 420;
@@ -18,11 +17,15 @@ export interface EdgePanelState {
   bottom: boolean;
 }
 
+/**
+ * Edge panels: bottom player defaults visible; AI / playlist open via pin/toggle
+ * (not auto hover — product convergence: only the play bar is ambient).
+ */
 export function useEdgePanels() {
-  const [panels, setPanels] = useState<EdgePanelState>({ left: false, right: false, bottom: false });
+  const [panels, setPanels] = useState<EdgePanelState>({ left: false, right: false, bottom: true });
   const timers = useRef<Partial<Record<PanelZone, ReturnType<typeof setTimeout>>>>({});
-  const pinned = useRef<Record<PanelZone, boolean>>({ left: false, right: false, bottom: false });
-  const visibleRef = useRef<EdgePanelState>({ left: false, right: false, bottom: false });
+  const pinned = useRef<Record<PanelZone, boolean>>({ left: false, right: false, bottom: true });
+  const visibleRef = useRef<EdgePanelState>({ left: false, right: false, bottom: true });
 
   const setVisible = useCallback((zone: PanelZone, value: boolean) => {
     visibleRef.current[zone] = value;
@@ -60,26 +63,26 @@ export function useEdgePanels() {
 
   const unpin = useCallback((zone: PanelZone) => {
     pinned.current[zone] = false;
-    // Right panel visibility is zone-driven; unpin only clears the pin latch.
-    if (zone !== 'right') scheduleHide(zone);
-  }, [scheduleHide]);
+    if (zone === 'right') {
+      setVisible('right', false);
+      return;
+    }
+    scheduleHide(zone);
+  }, [scheduleHide, setVisible]);
 
+  const toggle = useCallback((zone: PanelZone) => {
+    if (visibleRef.current[zone] && pinned.current[zone]) {
+      unpin(zone);
+      if (zone === 'left' || zone === 'bottom') setVisible(zone, false);
+      return;
+    }
+    pin(zone);
+  }, [pin, unpin, setVisible]);
+
+  // Bottom bar: keep ambient via edge hover when unpinned; left/right are button-driven only.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      const w = window.innerWidth;
       const h = window.innerHeight;
-
-      if (e.clientX < LEFT_EDGE) show('left');
-      else if (!pinned.current.left) scheduleHide('left');
-
-      const inRightZone = e.clientX > w - RIGHT_ZONE_WIDTH;
-      if (inRightZone) {
-        show('right');
-      } else {
-        pinned.current.right = false;
-        scheduleHide('right');
-      }
-
       if (e.clientY > h - BOTTOM_EDGE) show('bottom');
       else if (!pinned.current.bottom) scheduleHide('bottom');
     };
@@ -92,5 +95,5 @@ export function useEdgePanels() {
     };
   }, [show, scheduleHide]);
 
-  return { panels, pin, unpin };
+  return { panels, pin, unpin, toggle };
 }

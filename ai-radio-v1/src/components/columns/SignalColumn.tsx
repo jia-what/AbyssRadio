@@ -13,6 +13,7 @@ interface Props {
   onSendMessage: (text: string) => void;
   onPin: () => void;
   onUnpin: () => void;
+  onToggle?: () => void;
   parallax?: OrbitRotation;
 }
 
@@ -73,6 +74,7 @@ export default function SignalColumn({
   onSendMessage,
   onPin,
   onUnpin,
+  onToggle,
   parallax = { x: 0, y: 0 },
 }: Props) {
   const [input, setInput] = useState('');
@@ -94,23 +96,26 @@ export default function SignalColumn({
 
   return (
     <>
-      {/* Collapsed edge hint */}
+      {/* Collapsed edge hint — clickable */}
       <AnimatePresence>
         {!visible && (
-          <motion.div
+          <motion.button
+            type="button"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.8 }}
-            className="fixed left-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none"
+            onClick={onToggle}
+            className="fixed left-3 top-1/2 -translate-y-1/2 z-20 pointer-events-auto w-6 h-16 bg-transparent border-0 cursor-pointer"
+            aria-label="打开 AI"
           >
-            <div className="w-px h-12 bg-gradient-to-b from-transparent via-white/10 to-transparent" />
+            <div className="w-px h-12 bg-gradient-to-b from-transparent via-white/10 to-transparent mx-auto" />
             <motion.div
-              className="absolute top-1/2 -translate-y-1/2 -left-0.5 w-1.5 h-1.5 rounded-full bg-blue-400/30"
+              className="absolute top-1/2 -translate-y-1/2 left-1/2 -ml-0.5 w-1.5 h-1.5 rounded-full bg-blue-400/30"
               animate={{ opacity: isPlaying ? [0.2, 0.5 + bands.beat * 0.4, 0.2] : [0.15, 0.35, 0.15] }}
               transition={{ duration: isPlaying ? 0.35 : 3, repeat: Infinity, ease: 'easeInOut' }}
             />
-          </motion.div>
+          </motion.button>
         )}
       </AnimatePresence>
 

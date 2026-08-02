@@ -112,7 +112,21 @@ async function extractKugouUrl(meting, raw) {
     var p2 = typeof decoded2 === 'string' ? JSON.parse(decoded2) : decoded2;
     if (p2.url) return p2.url;
   } catch {}
-  return null;
+  return extractUrlFromRaw(raw);
+}
+
+/** Fetch KuGou play URL using a bound user cookie (Meting decode path). */
+export async function getKugouUrlWithCookie(songId, cookie) {
+  if (!cookie || !songId) return null;
+  var hash = String(songId).split('|')[0];
+  var meting = new Meting('kugou');
+  meting.cookie(cookie);
+  try {
+    var raw = await meting.url(hash);
+    return await extractKugouUrl(meting, raw);
+  } catch {
+    return null;
+  }
 }
 
 async function extractUrlFromRaw(raw) {
@@ -175,59 +189,56 @@ function isFeeSong(raw) {
 }
 
 /**
- * Get a playable URL with smart fallback.
- * If Netease returns a VIP trial (<60s), try KuGou as fallback.
+ * Single-pass Meting fallback: prefer non-trial URLs, else first playable.
+ * Callers should already have tried the authenticated primary source.
  */
-export async function getUrlSmart(songId, sources, searchKeyword) {
-  var sourcesList = sources || ['netease', 'kugou', 'kuwo'];
+export async function getUrlSmart(songId, sources, searchKeyword, kugouCookie) {
+  var sourcesList = sources || ['netease', 'kugou'];
+  var trialFallback = null;
   for (var src of sourcesList) {
     try {
       var songKey = songId;
-      // For KuGou/Kuwo, search by keyword first to get the right hash
-      if (src !== 'netease' && searchKeyword) {
+      if (src !== 'netease' && searchKeyword && !String(songKey).includes('|')) {
         var searchFn = src === 'kugou' ? searchKuGou : null;
         if (searchFn) {
           var results = await searchFn(searchKeyword, 5);
-          if (results && results.length > 0) {
-            songKey = results[0].id;
-          }
+          if (results && results.length > 0) songKey = results[0].id;
         }
       }
-      var raw = await getUrlRaw(songKey, src);
-      var url = await extractUrlFromRaw(raw);
-      if (url && !isFeeSong(raw)) return url;
+      var meting = makeMeting(src);
+      if (src === 'kugou' && kugouCookie) meting.cookie(kugouCookie);
+      var id = String(songKey).split('|')[0];
+      var raw = await meting.url(id);
+      var url = src === 'kugou'
+        ? await extractKugouUrl(meting, raw)
+        : await extractUrlFromRaw(raw);
+      if (!url) continue;
+      if (!isFeeSong(raw)) return url;
+      if (!trialFallback) trialFallback = url;
     } catch {}
   }
-  // Last resort: return whatever works even if trial
-  for (var src2 of sourcesList) {
-    try {
-      var songKey2 = src2 !== 'netease' ? songId : songId;
-      if (src2 !== 'netease' && searchKeyword) {
-        var searchFn2 = src2 === 'kugou' ? searchKuGou : null;
-        if (searchFn2) {
-          var results2 = await searchFn2(searchKeyword, 5);
-          if (results2 && results2.length > 0) {
-            songKey2 = results2[0].id;
-          }
-        }
-      }
-      var raw2 = await getUrlRaw(songKey2, src2);
-      var url2 = await extractUrlFromRaw(raw2);
-      if (url2) return url2;
-    } catch {}
-  }
-  return null;
+  return trialFallback;
 }
 
-async function getUrlRaw(songId, source) {
+async function getUrlRaw(songId, source, cookieOverride) {
   var meting = makeMeting(source);
-  return await meting.url(songId);
+  if (cookieOverride && source === 'kugou') meting.cookie(cookieOverride);
+  var id = String(songId).split('|')[0];
+  return await meting.url(id);
 }
 
-export async function getLyric(songId, source) {
+export async function getLyric(songId, source, kugouCookie) {
   if (!source) source = 'netease';
+  var id = String(songId);
+  if (source === 'kugou') {
+    const { getKugouLyric } = await import('./kugou.mjs');
+    const direct = await getKugouLyric(id, kugouCookie);
+    if (direct) return direct;
+    id = id.split('|')[0];
+  }
   var meting = makeMeting(source);
-  var raw = await meting.lyric(songId);
+  if (kugouCookie && source === 'kugou') meting.cookie(kugouCookie);
+  var raw = await meting.lyric(id);
   // raw is a JSON string from Meting — parse and extract the lyric text
   try {
     var parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;

@@ -7,7 +7,8 @@ const require = createRequire(import.meta.url);
 
 const loginQrKey = require('@neteasecloudmusicapienhanced/api/module/login_qr_key.js');
 const loginQrCreate = require('@neteasecloudmusicapienhanced/api/module/login_qr_create.js');
-const loginQrCheck = require('@neteasecloudmusicapienhanced/api/module/login_qr_check.js');
+const loginRefresh = require('@neteasecloudmusicapienhanced/api/module/login_refresh.js');
+const createOption = require('@neteasecloudmusicapienhanced/api/util/option.js');
 const userPlaylist = require('@neteasecloudmusicapienhanced/api/module/user_playlist.js');
 const playlistDetail = require('@neteasecloudmusicapienhanced/api/module/playlist_detail.js');
 const songDetail = require('@neteasecloudmusicapienhanced/api/module/song_detail.js');
@@ -15,19 +16,49 @@ const createRequest = require('@neteasecloudmusicapienhanced/api/util/request.js
 
 // In-memory session store
 const sessions = new Map();
+/** QR key → device cookie used when the key was created (must reuse on poll). */
+const pendingQr = new Map();
+let lastQrKeyAt = 0;
+const QR_KEY_COOLDOWN_MS = 5000;
+
+function isRateLimited(err) {
+  const body = err?.body || {};
+  const code = body.code || err?.status;
+  return code === 406 || /频繁/.test(body.msg || body.message || '');
+}
 
 export async function getQrKey() {
+  const now = Date.now();
+  if (now - lastQrKeyAt < QR_KEY_COOLDOWN_MS) {
+    throw new Error('请求过于频繁，请 5 秒后再试');
+  }
+  lastQrKeyAt = now;
+
   // Build a proper cookie with device info to avoid security blocks
   const deviceId = 'YD_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  const cookie = `osver=android; appver=8.7.01; os=android; deviceId=${deviceId}; channel=netease; __remember_me=true;`;
-  const result = await loginQrKey({ cookie, crypto: 'weapi' }, createRequest);
+  const deviceCookie = `osver=android; appver=8.7.01; os=android; deviceId=${deviceId}; channel=netease; __remember_me=true;`;
+  let result;
+  try {
+    result = await loginQrKey({ cookie: deviceCookie, crypto: 'weapi' }, createRequest);
+  } catch (err) {
+    if (isRateLimited(err)) throw new Error('网易接口限流，请稍候再试');
+    throw err;
+  }
   const key = result?.body?.data?.unikey;
   if (!key) throw new Error('Failed to get QR key');
+  pendingQr.set(key, { deviceCookie, createdAt: Date.now() });
   return key;
 }
 
 export async function createQr(key) {
-  const result = await loginQrCreate({ key, qrimg: true, platform: 'pc' }, createRequest);
+  const pending = pendingQr.get(key);
+  const result = await loginQrCreate({
+    key,
+    qrimg: true,
+    platform: 'pc',
+    cookie: pending?.deviceCookie,
+    crypto: 'weapi',
+  }, createRequest);
   return {
     key,
     qrimg: result?.body?.data?.qrimg || '',
@@ -35,27 +66,65 @@ export async function createQr(key) {
   };
 }
 
+function extractNeteaseCookie(result) {
+  if (Array.isArray(result?.cookie) && result.cookie.length) {
+    return result.cookie.map((c) => {
+      if (typeof c === 'string') return c.split(';')[0].trim();
+      if (c && typeof c === 'object' && c.name) return `${c.name}=${c.value}`;
+      return String(c);
+    }).filter(Boolean).join('; ');
+  }
+  const body = result?.body || {};
+  if (typeof body.cookie === 'string' && body.cookie) return body.cookie;
+  return '';
+}
+
 /**
  * Check QR login status.
- * Returns: { code: 800=expired, 801=pending, 802=scanned, 200=success }
+ * Returns: { code: 800=expired, 801=pending, 802=scanned, 803=confirming, 200=success }
  * On success, also returns the full cookie string.
  */
 export async function checkQr(key) {
-  const result = await loginQrCheck({ key }, createRequest);
+  const pending = pendingQr.get(key);
+  let result;
+  try {
+    // Bypass login_qr_check.js — its catch block references undefined `result` and throws 500.
+    result = await createRequest(
+      '/api/login/qrcode/client/login',
+      { key, type: 3 },
+      createOption({ key, cookie: pending?.deviceCookie, crypto: 'weapi' }),
+    );
+  } catch (err) {
+    if (isRateLimited(err)) {
+      return { code: 801, message: '操作频繁，请稍候再试' };
+    }
+    const body = err?.body || {};
+    const code = body.code || 801;
+    if (code === 800) pendingQr.delete(key);
+    return { code, message: body.message || body.msg };
+  }
+
   const body = result?.body || {};
   const code = body.code || 801;
 
-  if (code === 200 && result.cookie) {
-    const cookieStr = Array.isArray(result.cookie)
-      ? result.cookie.join('; ')
-      : (result.body?.cookie || '');
-
-    // Store in sessions
-    sessions.set(key, { cookie: cookieStr, loginAt: Date.now() });
-
-    return { code, cookie: cookieStr };
+  if (code === 406 || isRateLimited({ body, status: code })) {
+    return { code: 801, message: '操作频繁，请稍候再试' };
   }
 
+  if (code === 200) {
+    const cookieStr = extractNeteaseCookie({
+      ...result,
+      cookie: result?.cookie || body.cookie,
+    });
+    if (cookieStr) {
+      pendingQr.delete(key);
+      sessions.set(key, { cookie: cookieStr, loginAt: Date.now() });
+      return { code: 200, cookie: cookieStr };
+    }
+    return { code: 803 };
+  }
+
+  if (code === 800) pendingQr.delete(key);
   return { code };
 }
 
@@ -73,15 +142,56 @@ const loginStatusModule = require('@neteasecloudmusicapienhanced/api/module/logi
  */
 export async function verifyNeteaseCookie(cookie) {
   if (!cookie) throw new Error('缺少 Cookie');
-  const profile = await loginStatusModule({ cookie }, createRequest);
-  const p = profile?.body?.data?.profile;
-  const userId = p?.userId || profile?.body?.data?.account?.id;
-  if (!userId) throw new Error('网易云 Cookie 无效或已过期，请重新复制');
-  return {
-    userId: String(userId),
-    nickname: p?.nickname || '网易云用户',
-    avatar: p?.avatarUrl || '',
-  };
+  try {
+    const profile = await loginStatusModule({ cookie }, createRequest);
+    const p = profile?.body?.data?.profile;
+    const userId = p?.userId || profile?.body?.data?.account?.id;
+    if (!userId) throw new Error('网易云 Cookie 无效或已过期，请重新复制');
+    return {
+      userId: String(userId),
+      nickname: p?.nickname || '网易云用户',
+      avatar: p?.avatarUrl || '',
+    };
+  } catch (err) {
+    if (isRateLimited(err)) {
+      return { userId: '', nickname: '网易云用户' };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Refresh a Netease MUSIC_U cookie via /api/login/token/refresh.
+ * Returns the merged cookie string, or the original on soft failure.
+ */
+export async function refreshNeteaseCookie(cookie) {
+  if (!cookie) return cookie;
+  try {
+    const result = await loginRefresh({ cookie }, createRequest);
+    const body = result?.body || {};
+    if (body.code !== 200) return cookie;
+    const next =
+      (typeof body.cookie === 'string' && body.cookie) ||
+      (Array.isArray(result?.cookie) ? result.cookie.map((c) => String(c).split(';')[0]).join('; ') : '');
+    if (!next) return cookie;
+    // Merge refreshed tokens into the existing cookie jar
+    const jar = {};
+    for (const part of String(cookie).split(';')) {
+      const idx = part.indexOf('=');
+      if (idx < 0) continue;
+      jar[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+    }
+    for (const part of String(next).split(';')) {
+      const idx = part.indexOf('=');
+      if (idx < 0) continue;
+      const k = part.slice(0, idx).trim();
+      const v = part.slice(idx + 1).trim();
+      if (k) jar[k] = v;
+    }
+    return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  } catch {
+    return cookie;
+  }
 }
 
 function normalizeCoverUrl(raw) {
@@ -124,7 +234,23 @@ async function fetchCoverMap(ids, cookie) {
  * Get a user's playlists directly from a cookie string.
  */
 export async function getNeteasePlaylistsByCookie(cookie) {
-  const { userId } = await verifyNeteaseCookie(cookie);
+  let userId = '';
+  let nickname = '网易云用户';
+  try {
+    const user = await verifyNeteaseCookie(cookie);
+    userId = user.userId;
+    nickname = user.nickname;
+  } catch {
+    // fall through — login_status may rate-limit right after QR scan
+  }
+  if (!userId) {
+    const profile = await loginStatusModule({ cookie }, createRequest);
+    userId = String(
+      profile?.body?.data?.profile?.userId || profile?.body?.data?.account?.id || '',
+    );
+    nickname = profile?.body?.data?.profile?.nickname || nickname;
+  }
+  if (!userId) throw new Error('无法获取网易云用户信息，请稍后重试');
   const result = await userPlaylist({ uid: userId, cookie }, createRequest);
   const playlists = result?.body?.playlist || [];
   const mapped = playlists.map(p => ({

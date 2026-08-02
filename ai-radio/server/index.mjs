@@ -1,14 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import { Readable } from 'stream';
-import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric } from './ncm.mjs';
+import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie } from './ncm.mjs';
 import { getUrlNetease } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
-import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked, addChatMessage, getChatHistory } from './db.mjs';
-import { getQrKey, createQr, checkQr, getUserPlaylists, getPlaylistTracks,
-  verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
-import { verifyKugouCookie, getKugouPlaylistsByCookie, getKugouTracksByCookie } from './kugou.mjs';
-import { createSession, getSession } from './session.mjs';
+import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
+import { verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
+import { verifyKugouCookie, getKugouPlaylistsByCookie, getKugouTracksByCookie, getKugouPlayUrl } from './kugou.mjs';
+import { normalizeCookieInput } from './kugouSign.mjs';
+import { qrKeyForPlatform, qrImageForPlatform, qrCheckForPlatform } from './qrLogin.mjs';
+import { createSession, getSession, updateSessionCookie, ensureFreshSession } from './session.mjs';
+import { ok, fail, Err } from './response.mjs';
+import { recordUrlResult, recordPlayResult, getMetrics } from './metrics.mjs';
+import { queueAdd, playerPlay, getPlayerStatus } from './playerState.mjs';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,8 +20,25 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+/** Pick Referer header for upstream CDN hotlink checks. */
+function proxyRefererForUrl(rawUrl) {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    if (host.includes('kugou.com')) return 'https://www.kugou.com/';
+    if (host.includes('kuwo.cn')) return 'https://www.kuwo.cn/';
+    if (host.includes('qpic.cn') || host.includes('qq.com')) return 'https://y.qq.com/';
+    return 'https://music.163.com/';
+  } catch {
+    return 'https://music.163.com/';
+  }
+}
+
 app.get('/api/health', function(req, res) {
-  res.json({ status: 'ok', name: 'Abyss Radio API' });
+  return ok(res, { status: 'ok', name: 'Abyss Radio API' });
+});
+
+app.get('/api/metrics', function(req, res) {
+  return ok(res, getMetrics());
 });
 
 app.get('/api/music/search', async function(req, res) {
@@ -48,27 +69,55 @@ app.get('/api/music/url', async function(req, res) {
   }
 });
 
-// Smart URL: tries Netease first (via NEAPI for VIP), falls back to KuGou/Kuwo
+/**
+ * Smart URL — one primary auth chain + one Meting fallback.
+ * Primary: session platform wins (netease NEAPI / kugou auth). Fallback: getUrlSmart once.
+ */
 app.get('/api/music/url-smart', async function(req, res) {
   const id = req.query.id || '';
-  const sources = req.query.sources ? req.query.sources.split(',') : ['netease', 'kugou', 'kuwo'];
+  const sources = req.query.sources ? req.query.sources.split(',') : ['netease', 'kugou'];
   const keyword = req.query.q || '';
   const key = req.query.key || '';
   if (!id) return res.status(400).json({ error: 'missing query param id' });
   try {
-    // Resolve a bound netease session cookie (for full-length VIP playback)
-    const session = key ? getSession(key) : null;
-    const neteaseCookie = session && session.platform === 'netease' ? session.cookie : undefined;
-    // Step 1: Try NEAPI VIP URL (authenticated Netease)
-    if (sources.includes('netease')) {
-      const vipUrl = await getUrlNetease(id, neteaseCookie);
-      if (vipUrl) return res.json({ url: vipUrl });
+    let session = null;
+    let neteaseCookie;
+    let kugouCookie = process.env.KUGOU_COOKIE || undefined;
+    if (key) {
+      const fresh = await ensureFreshSession(key);
+      session = fresh?.session || null;
+      if (session?.platform === 'netease') neteaseCookie = fresh.cookie;
+      if (session?.platform === 'kugou') kugouCookie = fresh.cookie;
     }
-    // Step 2: Try Meting smart fallback
-    const result = await getUrlSmart(id, sources, keyword);
-    if (!result) return res.status(404).json({ error: 'no url found from any source' });
-    res.json({ url: result });
+
+    // Primary: authenticated source matching session (or sources order)
+    const primary = session?.platform && sources.includes(session.platform)
+      ? session.platform
+      : (sources.find((s) => s === 'netease' || s === 'kugou') || sources[0]);
+
+    let url = null;
+    if (primary === 'netease' && sources.includes('netease')) {
+      url = await getUrlNetease(id, neteaseCookie);
+    } else if (primary === 'kugou' && sources.includes('kugou') && kugouCookie) {
+      url = await getKugouPlayUrl(id, kugouCookie, key);
+      if (!url) url = await getKugouUrlWithCookie(id, kugouCookie);
+    } else if (sources.includes('netease')) {
+      url = await getUrlNetease(id, neteaseCookie);
+    }
+
+    // Exact playlist ids must not cross-source search-fallback
+    if (!url && !String(id).includes('|')) {
+      url = await getUrlSmart(id, sources, keyword, kugouCookie);
+    }
+
+    if (!url) {
+      recordUrlResult(false);
+      return res.status(404).json({ error: 'no url found from any source' });
+    }
+    recordUrlResult(true);
+    res.json({ url });
   } catch (e) {
+    recordUrlResult(false);
     res.status(500).json({ error: e.message });
   }
 });
@@ -78,9 +127,10 @@ app.get('/api/img', async function(req, res) {
   const raw = req.query.url || '';
   if (!raw || !/^https?:\/\//i.test(raw)) return res.status(400).end();
   try {
+    const referer = proxyRefererForUrl(raw);
     const upstream = await fetch(raw, {
       headers: {
-        'Referer': 'https://music.163.com/',
+        Referer: referer,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
       },
     });
@@ -94,15 +144,28 @@ app.get('/api/img', async function(req, res) {
   }
 });
 
-// Audio proxy — Referer + CORS so <audio> and Web Audio analyser can read the stream
+// Audio proxy — Referer + session cookie + CORS so <audio> can read VIP streams
 app.get('/api/audio', async function(req, res) {
   const raw = req.query.url || '';
   if (!raw || !/^https?:\/\//i.test(raw)) return res.status(400).end();
   try {
+    const referer = proxyRefererForUrl(raw);
+    let host = '';
+    try { host = new URL(raw).hostname.toLowerCase(); } catch { /* ignore */ }
+    const isKugou = /kugou\.com/i.test(host);
+    const isNetease = /126\.net|netease/i.test(host);
     const upstreamHeaders = {
-      'Referer': 'https://music.163.com/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      Referer: referer,
+      'User-Agent': isKugou
+        ? 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
     };
+    const sessionKey = req.query.key || '';
+    const session = sessionKey ? getSession(sessionKey) : null;
+    if (session?.cookie) {
+      if (isKugou && session.platform === 'kugou') upstreamHeaders.Cookie = session.cookie;
+      else if (isNetease && session.platform === 'netease') upstreamHeaders.Cookie = session.cookie;
+    }
     if (req.headers.range) upstreamHeaders['Range'] = req.headers.range;
 
     const upstream = await fetch(raw, { headers: upstreamHeaders });
@@ -131,25 +194,99 @@ app.get('/api/audio', async function(req, res) {
 app.get('/api/music/lyric', async function(req, res) {
   const id = req.query.id || '';
   const source = req.query.source || 'netease';
+  const key = req.query.key || '';
   if (!id) return res.status(400).json({ error: 'missing query param id' });
   try {
-    const lyric = await getLyric(id, source);
+    const session = key ? getSession(key) : null;
+    const kugouCookie = session && session.platform === 'kugou'
+      ? session.cookie
+      : (process.env.KUGOU_COOKIE || undefined);
+    const lyric = await getLyric(id, source, kugouCookie);
     res.json({ lyric: lyric || '' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// DeepSeek AI DJ chat endpoint
+// DeepSeek AI DJ chat — injects current track (body.track or server player status)
 app.post('/api/chat', express.json(), async function(req, res) {
   const { message, history, track } = req.body || {};
   if (!message) return res.status(400).json({ error: 'missing message' });
   try {
-    const result = await chatWithDeepSeek(message, history || [], track || null);
+    const status = getPlayerStatus();
+    const nowPlaying = track || status.current || null;
+    const result = await chatWithDeepSeek(message, history || [], nowPlaying);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ===== Stable control plane (Jarvis / external) — { code, data, msg } =====
+
+app.post('/api/queue/add', express.json(), function(req, res) {
+  const body = req.body || {};
+  const items = body.tracks || body.track || body;
+  try {
+    const data = queueAdd(items, { sessionKey: body.sessionKey || body.key });
+    return ok(res, data, 'queued');
+  } catch (e) {
+    return fail(res, Err.BAD_REQUEST, e.message, 400);
+  }
+});
+
+app.post('/api/player/play', express.json(), async function(req, res) {
+  const body = req.body || {};
+  try {
+    const data = playerPlay({
+      index: body.index,
+      id: body.id,
+      source: body.source,
+      title: body.title,
+      artist: body.artist,
+      cover: body.cover,
+      duration: body.duration,
+      sessionKey: body.sessionKey || body.key,
+    });
+    // Resolve a playable URL for the current track when possible
+    const cur = data.current;
+    let playUrl = null;
+    if (cur?.id) {
+      const key = data.sessionKey || '';
+      const fresh = key ? await ensureFreshSession(key) : null;
+      const platform = cur.source || fresh?.session?.platform || 'netease';
+      try {
+        if (platform === 'kugou') {
+          const cookie = fresh?.session?.platform === 'kugou'
+            ? fresh.cookie
+            : (process.env.KUGOU_COOKIE || undefined);
+          if (cookie) {
+            playUrl = await getKugouPlayUrl(cur.id, cookie, key);
+            if (!playUrl) playUrl = await getKugouUrlWithCookie(cur.id, cookie);
+          }
+        } else {
+          const cookie = fresh?.session?.platform === 'netease' ? fresh.cookie : undefined;
+          playUrl = await getUrlNetease(cur.id, cookie);
+        }
+        if (!playUrl && !String(cur.id).includes('|')) {
+          playUrl = await getUrlSmart(cur.id, [platform, 'netease', 'kugou'], cur.title, process.env.KUGOU_COOKIE);
+        }
+      } catch { /* leave playUrl null */ }
+    }
+    if (playUrl) {
+      recordPlayResult(true);
+      return ok(res, { ...data, url: playUrl }, 'playing');
+    }
+    recordPlayResult(false);
+    return ok(res, { ...data, url: null }, 'playing (url unresolved)');
+  } catch (e) {
+    recordPlayResult(false);
+    return fail(res, Err.BAD_REQUEST, e.message, 400);
+  }
+});
+
+app.get('/api/player/status', function(req, res) {
+  return ok(res, getPlayerStatus());
 });
 
 // ===== Database endpoints =====
@@ -215,9 +352,10 @@ app.get('/api/likes/check', async function(req, res) {
 
 // Step 1: Get QR key (required before creating QR code)
 app.get('/api/login/qr-key', async function(req, res) {
+  const platform = req.query.platform || 'netease';
   try {
-    const key = await getQrKey();
-    res.json({ key });
+    const result = await qrKeyForPlatform(platform);
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -226,50 +364,39 @@ app.get('/api/login/qr-key', async function(req, res) {
 // Step 2: Generate QR code image from key
 app.get('/api/login/qr', async function(req, res) {
   const key = req.query.key;
+  const platform = req.query.platform || 'netease';
   if (!key) return res.status(400).json({ error: 'missing key' });
   try {
-    const qr = await createQr(key);
+    const qr = await qrImageForPlatform(platform, key);
     res.json(qr);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Step 3: Poll QR login status
+// Step 3: Poll QR login status — on success returns session key for playlists API
 app.get('/api/login/qr-check', async function(req, res) {
   const key = req.query.key;
+  const platform = req.query.platform || 'netease';
   if (!key) return res.status(400).json({ error: 'missing key' });
-  try {
-    const result = await checkQr(key);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Set cookie manually (for debugging / direct paste)
-app.post('/api/login/cookie', express.json(), async function(req, res) {
-  const { key, cookie } = req.body || {};
-  if (!key || !cookie) return res.status(400).json({ error: 'missing key or cookie' });
-  // Store in sessions
-  const { getSessionCookie } = await import('./login.mjs');
-  // Use the module's internal store via a temp approach
-  res.json({ ok: true });
+  const result = await qrCheckForPlatform(platform, key);
+  res.json(result);
 });
 
 // ===== Cookie binding (manual) =====
 
 // Bind a platform cookie -> returns a session key + user info
 app.post('/api/session/bind', express.json(), async function(req, res) {
-  const { platform, cookie } = req.body || {};
-  if (!platform || !cookie) return res.status(400).json({ error: 'missing platform or cookie' });
+  const { platform, cookie: rawCookie } = req.body || {};
+  if (!platform || !rawCookie) return res.status(400).json({ error: 'missing platform or cookie' });
+  let cookie = platform === 'kugou' ? normalizeCookieInput(rawCookie) : String(rawCookie).trim();
   try {
     let user;
     if (platform === 'netease') {
       user = await verifyNeteaseCookie(cookie);
     } else if (platform === 'kugou') {
       user = verifyKugouCookie(cookie);
-      process.env.KUGOU_COOKIE = cookie; // enable VIP playback via Meting
+      process.env.KUGOU_COOKIE = cookie;
     } else {
       return res.status(400).json({ error: 'unsupported platform' });
     }
@@ -285,14 +412,20 @@ app.post('/api/session/bind', express.json(), async function(req, res) {
 // Get user's playlists for a bound session
 app.get('/api/playlists', async function(req, res) {
   const key = req.query.key;
-  const session = key ? getSession(key) : null;
+  const fresh = key ? await ensureFreshSession(key) : null;
+  const session = fresh?.session;
   if (!session) return res.status(401).json({ error: '会话已失效，请重新绑定账号' });
   try {
     let playlists;
     if (session.platform === 'netease') {
-      playlists = await getNeteasePlaylistsByCookie(session.cookie);
+      playlists = await getNeteasePlaylistsByCookie(fresh.cookie);
     } else if (session.platform === 'kugou') {
-      playlists = await getKugouPlaylistsByCookie(session.cookie, session.user);
+      const result = await getKugouPlaylistsByCookie(fresh.cookie);
+      if (result.cookie && result.cookie !== fresh.cookie) {
+        updateSessionCookie(key, result.cookie);
+        process.env.KUGOU_COOKIE = result.cookie;
+      }
+      playlists = result.playlists;
     } else {
       return res.status(400).json({ error: 'unsupported platform' });
     }
@@ -306,15 +439,21 @@ app.get('/api/playlists', async function(req, res) {
 app.get('/api/playlist/tracks', async function(req, res) {
   const key = req.query.key;
   const listId = req.query.id;
-  const session = key ? getSession(key) : null;
+  const fresh = key ? await ensureFreshSession(key) : null;
+  const session = fresh?.session;
   if (!session) return res.status(401).json({ error: '会话已失效，请重新绑定账号' });
   if (!listId) return res.status(400).json({ error: 'missing playlist id' });
   try {
     let tracks;
     if (session.platform === 'netease') {
-      tracks = await getNeteaseTracksByCookie(listId, session.cookie);
+      tracks = await getNeteaseTracksByCookie(listId, fresh.cookie);
     } else if (session.platform === 'kugou') {
-      tracks = await getKugouTracksByCookie(listId, session.cookie);
+      const result = await getKugouTracksByCookie(listId, fresh.cookie);
+      if (result.cookie && result.cookie !== fresh.cookie) {
+        updateSessionCookie(key, result.cookie);
+        process.env.KUGOU_COOKIE = result.cookie;
+      }
+      tracks = result.tracks;
     } else {
       return res.status(400).json({ error: 'unsupported platform' });
     }

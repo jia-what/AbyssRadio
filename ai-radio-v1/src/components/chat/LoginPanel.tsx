@@ -24,24 +24,23 @@ export default function LoginPanel({ isOpen, onClose, onPlayTrack, currentTrack 
   // Start QR login
   const startQr = useCallback(async () => {
     try {
-      const keyRes = await fetch('/api/login/qr-key');
-      const keyData = await keyRes.json();
-      setQrKey(keyData.key);
-
-      const qrRes = await fetch(`/api/login/qr?key=${keyData.key}`);
+      const keyData = await fetch('/api/login/qr-key?platform=netease');
+      const keyJson = await keyData.json();
+      const qrRes = await fetch(`/api/login/qr?platform=netease&key=${encodeURIComponent(keyJson.key)}`);
       const qrData = await qrRes.json();
+      setQrKey(keyJson.key);
       setQrImg(qrData.qrimg);
       setQrCode(801);
 
-      // Start polling
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
-        const checkRes = await fetch(`/api/login/qr-check?key=${keyData.key}`);
+        const checkRes = await fetch(`/api/login/qr-check?platform=netease&key=${encodeURIComponent(keyJson.key)}`);
         const check = await checkRes.json();
         setQrCode(check.code);
-        if (check.code === 200) {
+        if (check.code === 200 && check.key) {
           if (pollRef.current) clearInterval(pollRef.current);
-          loadPlaylists(keyData.key);
+          setQrKey(check.key);
+          loadPlaylists(check.key);
         }
       }, 2000);
     } catch {}

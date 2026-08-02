@@ -41,14 +41,18 @@ export async function getMusicUrl(
   sessionKey?: string
 ): Promise<string | null> {
   let apiUrl = `/api/music/url-smart?id=${encodeURIComponent(id)}&sources=${encodeURIComponent(source)},kugou,kuwo`;
-  if (keyword) apiUrl += `&q=${encodeURIComponent(keyword)}`;
+  // Playlist-precision ids (hash|album_audio_id): never pass keyword — avoids wrong-song search fallback
+  if (keyword && !String(id).includes('|')) apiUrl += `&q=${encodeURIComponent(keyword)}`;
   if (sessionKey) apiUrl += `&key=${encodeURIComponent(sessionKey)}`;
   const res = await fetch(apiUrl);
   if (!res.ok) return null;
   const data = await res.json();
   const streamUrl = data.url ?? null;
   if (!streamUrl) return null;
-  return `/api/audio?url=${encodeURIComponent(streamUrl)}`;
+  let proxy = `/api/audio?url=${encodeURIComponent(streamUrl)}`;
+  // KuGou VIP CDN often requires the bound session cookie on fetch
+  if (sessionKey) proxy += `&key=${encodeURIComponent(sessionKey)}`;
+  return proxy;
 }
 
 /**
@@ -56,9 +60,11 @@ export async function getMusicUrl(
  */
 export async function getMusicLyric(
   id: string,
-  source: string
+  source: string,
+  sessionKey?: string
 ): Promise<string> {
-  const url = `/api/music/lyric?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`;
+  let url = `/api/music/lyric?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`;
+  if (sessionKey) url += `&key=${encodeURIComponent(sessionKey)}`;
   const res = await fetch(url);
   if (!res.ok) return '';
   const data = await res.json();

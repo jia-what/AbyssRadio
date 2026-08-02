@@ -60,6 +60,7 @@ export function useRadioState() {
   const [trackSources, setTrackSources] = useState<Record<string, string>>({});
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [realDuration, setRealDuration] = useState(0); // actual audio duration from <audio>
+  const [isSimulatedPlayback, setIsSimulatedPlayback] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pulseAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -167,8 +168,22 @@ export function useRadioState() {
     };
 
     audio.onerror = () => {
-      console.warn('Audio error, falling back to simulated playback');
+      const track = playlistRef.current[trackIndexRef.current];
+      const hasRealSource = !!(track && trackSourcesRef.current[track.id]);
       clearAudioSrc(audio);
+      if (hasRealSource) {
+        console.warn('音频加载失败，以歌词模式继续');
+        if (!isPlayingRef.current) {
+          isPlayingRef.current = true;
+          setIsPlaying(true);
+        }
+        setIsSimulatedPlayback(true);
+        cancelAnimationFrame(rafRef.current);
+        lastTickRef.current = 0;
+        rafRef.current = requestAnimationFrame(ts => tickRef.current(ts));
+        return;
+      }
+      console.warn('Audio error, falling back to simulated playback');
       if (isPlayingRef.current) {
         cancelAnimationFrame(rafRef.current);
         lastTickRef.current = 0;
@@ -223,6 +238,7 @@ export function useRadioState() {
   const startSimulatedPlayback = useCallback(() => {
     isPlayingRef.current = true;
     setIsPlaying(true);
+    setIsSimulatedPlayback(true);
     setRealDuration(duration);
     lastTickRef.current = 0;
     rafRef.current = requestAnimationFrame(tick);
@@ -231,6 +247,7 @@ export function useRadioState() {
   const stopSimulatedPlayback = useCallback(() => {
     isPlayingRef.current = false;
     setIsPlaying(false);
+    setIsSimulatedPlayback(false);
     cancelAnimationFrame(rafRef.current);
   }, []);
 
@@ -241,7 +258,7 @@ export function useRadioState() {
     try {
       const [url, lrcRaw] = await Promise.all([
         getMusicUrl(trackId, source, trackName, sessionKeyRef.current),
-        getMusicLyric(trackId, source),
+        getMusicLyric(trackId, source, sessionKeyRef.current),
       ]);
 
       if (gen !== loadGenRef.current) return;
@@ -256,6 +273,7 @@ export function useRadioState() {
       const audio = audioRef.current;
       if (url && audio) {
         if (gen !== loadGenRef.current) return;
+        setIsSimulatedPlayback(false);
         audio.src = url;
         audio.currentTime = 0;
         await audio.play();
@@ -272,6 +290,10 @@ export function useRadioState() {
         setProgress(0);
       } else {
         if (gen !== loadGenRef.current) return;
+        const hasRealSource = !!trackSourcesRef.current[trackId];
+        if (hasRealSource) {
+          console.warn('无法获取播放地址，以歌词模式继续（无音频）');
+        }
         startSimulatedPlayback();
       }
     } catch (err) {
@@ -289,11 +311,22 @@ export function useRadioState() {
       resumePulseCtx();
       if (audio.paused) { void audio.play(); setIsPlaying(true); isPlayingRef.current = true; }
       else { audio.pause(); setIsPlaying(false); isPlayingRef.current = false; }
-    } else {
-      if (isPlayingRef.current) stopSimulatedPlayback();
-      else startSimulatedPlayback();
+      return;
     }
-  }, [startSimulatedPlayback, stopSimulatedPlayback, resumePulseCtx]);
+    const track = playlistRef.current[trackIndexRef.current];
+    const src = track && trackSourcesRef.current[track.id];
+    if (src) {
+      resumePulseCtx();
+      if (isPlayingRef.current) {
+        stopSimulatedPlayback();
+      } else {
+        loadAndPlayTrack(track.id, src, `${track.title} ${track.artist}`);
+      }
+      return;
+    }
+    if (isPlayingRef.current) stopSimulatedPlayback();
+    else startSimulatedPlayback();
+  }, [startSimulatedPlayback, stopSimulatedPlayback, resumePulseCtx, loadAndPlayTrack]);
 
   // Keep playNextRef in sync so audio.onended always calls latest
   const playNext = useCallback(() => {
@@ -507,7 +540,7 @@ export function useRadioState() {
     isPlaying, messages, isPortaling,
     currentTrack, playlist, progress, currentTime, duration, volume, isMuted,
     trackLyrics, lyricIndex, lyricLines, realDuration: displayDuration,
-    isDemoPlayback: isPlaying && !!currentTrack && !trackSources[currentTrack.id],
+    isDemoPlayback: isSimulatedPlayback && isPlaying,
     audioRef,
     pulseAnalyserRef,
     beatAnalyserRef,

@@ -17,4 +17,4 @@ alwaysApply: true
 
 ## 工作流
 - 每完成一个阶段 `git commit` 一次（如 `Phase 2: 侧栏 3D 堆叠`）作为检查点。
-- 改完前端用 ReadLints 自查；不硬删文件（无 git 时移到 `_archive/`）。
+- 改完前端用 ReadLints 自查；清理前先备份到 `E:\VM\AI_audio_bak_*`。
