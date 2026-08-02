@@ -12,7 +12,13 @@ const { pathToFileURL } = require('url');
 const APP_ROOT = path.join(__dirname, '..');
 const SERVER_DIR = path.join(APP_ROOT, 'ai-radio', 'server');
 const FRONTEND_DIST = path.join(APP_ROOT, 'ai-radio-v1', 'dist');
-const KUGOU_COOKIE_FILE = path.join(process.env.APPDATA || path.join(app.getPath('appData'), '..'), 'Mineradio', '.kugou-cookie');
+// Runtime-writable data dir: dev = server dir (writes alongside code), packaged = userData.
+const IS_PACKAGED = app.isPackaged;
+const DATA_DIR = IS_PACKAGED
+  ? path.join(app.getPath('userData'))
+  : SERVER_DIR;
+const KUGOU_COOKIE_FILE = path.join(DATA_DIR, '.kugou-cookie');
+const ENV_FILE = path.join(DATA_DIR, '.env');
 const BACKEND_PORT = Number(process.env.PORT) || 4000;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
@@ -52,8 +58,15 @@ async function startBackend() {
   if (backendStarted) return;
   backendStarted = true;
   try {
-    process.chdir(SERVER_DIR); // dotenv loads .env from cwd
+    // dotenv loads .env from cwd — point it at the writable data dir.
+    process.chdir(DATA_DIR);
     process.env.FRONTEND_DIST = FRONTEND_DIST;
+    process.env.ABYSS_DATA_DIR = DATA_DIR;
+    // Dev: keep KUGOU_COOKIE readable from the old server/.env too.
+    if (!IS_PACKAGED && !fs.existsSync(path.join(DATA_DIR, '.env'))) {
+      const legacyEnv = path.join(SERVER_DIR, '.env');
+      if (fs.existsSync(legacyEnv)) fs.copyFileSync(legacyEnv, path.join(DATA_DIR, '.env'));
+    }
     const mod = await import(pathToFileURL(path.join(SERVER_DIR, 'index.mjs')).href);
     console.log('[abyss] backend module loaded');
     await waitForBackend(15000);
@@ -227,6 +240,28 @@ function persistKugouCookie(cookie) {
   }
 }
 
+/** Update KUGOU_COOKIE in the backend .env so the fresh cookie survives restarts. */
+function persistKugouCookieEnv(cookie) {
+  try {
+    const envPath = ENV_FILE;
+    fs.mkdirSync(path.dirname(envPath), { recursive: true });
+    let env = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    const oneLine = cookie.replace(/\r|\n/g, ' ');
+    const escaped = oneLine.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const line = `KUGOU_COOKIE="${escaped}"`;
+    if (/^KUGOU_COOKIE=.*$/m.test(env)) {
+      env = env.replace(/^KUGOU_COOKIE=.*$/m, line);
+    } else {
+      env = (env ? env.replace(/\s*$/, '\n') : '') + line + '\n';
+    }
+    fs.writeFileSync(envPath, env, 'utf8');
+    return true;
+  } catch (e) {
+    console.warn('[abyss] persist kugou cookie to .env failed:', e.message);
+    return false;
+  }
+}
+
 // ================= IPC =================
 
 ipcMain.handle('kugou:login', async () => {
@@ -234,6 +269,7 @@ ipcMain.handle('kugou:login', async () => {
     const result = await openKugouLoginWindow();
     if (result.ok && result.cookie) {
       const saved = persistKugouCookie(result.cookie);
+      const savedEnv = persistKugouCookieEnv(result.cookie);
       // Notify backend (it re-reads cookie on next request via process.env or file).
       try {
         const post = await fetch(`${BACKEND_URL}/api/session/bind`, {
@@ -247,6 +283,7 @@ ipcMain.handle('kugou:login', async () => {
         console.warn('[abyss] backend bind after kugou login failed:', e.message);
       }
       result.saved = saved;
+      result.savedEnv = savedEnv;
     }
     return result;
   } catch (e) {

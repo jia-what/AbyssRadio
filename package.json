@@ -16,6 +16,16 @@
     "electron": "^42.8.0",
     "electron-builder": "^26.15.3"
   },
+  "dependencies": {
+    "@meting/core": "^1.6.1",
+    "@neteasecloudmusicapienhanced/api": "^4.36.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "node-forge": "^1.4.0",
+    "qrcode": "^1.5.4",
+    "sql.js": "^1.14.1"
+  },
   "build": {
     "appId": "com.abyss.radio",
     "productName": "AbyssRadio",
@@ -24,8 +34,9 @@
     },
     "files": [
       "desktop/**/*",
-      "ai-radio/**/*",
+      "ai-radio/server/**/*",
       "ai-radio-v1/dist/**/*",
+      "!ai-radio/server/node_modules/**/*",
       "!ai-radio-v1/node_modules/**/*"
     ],
     "extraMetadata": {

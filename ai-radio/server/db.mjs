@@ -8,7 +8,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, 'abyss.db');
+// Runtime-writable data dir (Electron sets ABYSS_DATA_DIR = userData).
+// Falls back to the module dir for plain `node index.mjs` development.
+const DATA_DIR = process.env.ABYSS_DATA_DIR || __dirname;
+const DB_PATH = path.join(DATA_DIR, 'abyss.db');
 
 let db = null;
 
