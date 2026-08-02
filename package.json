@@ -37,7 +37,9 @@
       "ai-radio/server/**/*",
       "ai-radio-v1/dist/**/*",
       "!ai-radio/server/node_modules/**/*",
-      "!ai-radio-v1/node_modules/**/*"
+      "!ai-radio-v1/node_modules/**/*",
+      "!ai-radio/server/.env",
+      "!ai-radio/server/abyss.db"
     ],
     "extraMetadata": {
       "main": "desktop/main.cjs"
