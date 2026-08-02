@@ -106,7 +106,7 @@ app.get('/api/music/url-smart', async function(req, res) {
     if (primary === 'netease' && sources.includes('netease')) {
       url = await getUrlNetease(id, neteaseCookie);
     } else if (primary === 'kugou' && sources.includes('kugou') && kugouCookie) {
-      url = await getKugouPlayUrl(id, kugouCookie, key);
+      url = await getKugouPlayUrl(id, kugouCookie, key, { quality: req.query.quality });
       if (!url) url = await getKugouUrlWithCookie(id, kugouCookie);
     } else if (sources.includes('netease')) {
       url = await getUrlNetease(id, neteaseCookie);

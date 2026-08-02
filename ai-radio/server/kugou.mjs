@@ -191,6 +191,221 @@ const KUGOU_HEADERS = {
   'User-Agent': KUGOU_H5_UA,
 };
 
+// ===== VIP membership probe (Mineradio-style, reference-rewritten) =====
+const KUGOU_VIP_ROLEINFO_URL = 'https://vip.kugou.com/recharge/roleinfo';
+// role: 1/2 = VIP, 6/11/13 = SVIP, 31/33 = music package
+const KUGOU_WEB_VIP_ROLES = new Set([1, 2]);
+const KUGOU_WEB_SVIP_ROLES = new Set([6, 11, 13]);
+const KUGOU_WEB_MUSIC_PACKAGE_ROLES = new Set([31, 33]);
+
+const KUGOU_VIP_TYPE_KEYS = [
+  'vipType', 'vip_type', 'VIPType', 'isVIP', 'isVip', 'is_vip', 'vip_level', 'vipLevel',
+  'music_vip_level', 'musicVipLevel', 'm_type', 'p_type', 'vip_y_type', 'union_vip_type',
+  'user_vip_type', 'vip_status', 'member_type', 'member_level', 'vip',
+];
+const KUGOU_SVIP_TYPE_KEYS = [
+  'svipType', 'svip_type', 'SVIPType', 'isSVIP', 'isSvip', 'is_svip', 'superVip', 'super_vip',
+  'superVipLevel', 'super_vip_level', 'super_vip_type', 'luxury_vip_type', 'vip_luxury_type',
+  'svip_level', 'svip_status', 'svip',
+];
+const KUGOU_VIP_EXPIRY_SOURCE_KEYS = [
+  'vip_end_time', 'vipEndTime', 'vip_expire_time', 'vipExpireTime', 'vip_expire', 'vipExpire',
+  'music_vip_end_time', 'musicVipEndTime', 'raw_vip_end_time', 'rawVipEndTime', 'rawvipendtime',
+];
+const KUGOU_SVIP_EXPIRY_SOURCE_KEYS = [
+  'svip_end_time', 'svipEndTime', 'svip_expire_time', 'svipExpireTime',
+  'super_vip_end_time', 'superVipEndTime', 'luxury_vip_end_time', 'luxuryVipEndTime',
+];
+const KUGOU_MUSIC_PACKAGE_EXPIRY_SOURCE_KEYS = [
+  'music_end_time', 'musicEndTime', 'music_expire_time', 'musicExpireTime',
+  'raw_music_end_time', 'rawMusicEndTime', 'rawmusicendtime',
+];
+const KUGOU_WEB_ROLE_KEYS = [
+  'role', 'user_type', 'userType', 'usertype',
+  'user_y_type', 'userYType', 'userytype', 'y_type', 'yType', 'ytype',
+];
+
+const vipCache = new Map(); // key: userid -> { at, isVip, isSvip, vipLevel, role, membershipKnown }
+
+function kugouVipCacheKey(pool) {
+  return String(pool?.userid || pool?.KugooID || 'guest');
+}
+
+function firstPositiveNumber(obj, keys) {
+  if (!obj || typeof obj !== 'object') return 0;
+  for (const k of keys) {
+    if (obj[k] == null || String(obj[k]).trim() === '') continue;
+    const n = Number(obj[k]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function firstTimeValue(obj, keys) {
+  if (!obj || typeof obj !== 'object') return { present: false, future: false, expiresAt: 0 };
+  for (const k of keys) {
+    if (obj[k] == null || String(obj[k]).trim() === '') continue;
+    const raw = String(obj[k]).trim();
+    let ts = Number(raw);
+    // tolerate date strings
+    if (!Number.isFinite(ts) || ts <= 0) {
+      const d = Date.parse(raw);
+      if (!Number.isFinite(d) || d <= 0) continue;
+      ts = Math.floor(d / 1000);
+    }
+    if (ts < 1e12) ts *= 1000; // seconds -> ms
+    return { present: true, future: ts > Date.now(), expiresAt: ts };
+  }
+  return { present: false, future: false, expiresAt: 0 };
+}
+
+/** Recursively collect candidate objects from a vip API payload. */
+function collectKugouVipObjects(value, out, depth, expectedUserId, inheritedUserId) {
+  if (depth > 6 || value == null) return out;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectKugouVipObjects(item, out, depth + 1, expectedUserId, inheritedUserId));
+    return out;
+  }
+  if (typeof value !== 'object') return out;
+  const objectUserId = String(value.userid || value.userId || value.uid || '').replace(/\D/g, '');
+  const scopedUserId = objectUserId || inheritedUserId || '';
+  if (expectedUserId && scopedUserId && scopedUserId !== expectedUserId) return out;
+  out.push(value);
+  Object.keys(value).forEach((key) => {
+    const child = value[key];
+    if (child && typeof child === 'object') {
+      const mapUserId = /^\d{4,}$/.test(String(key)) ? String(key) : '';
+      if (expectedUserId && mapUserId && mapUserId !== expectedUserId) return;
+      collectKugouVipObjects(child, out, depth + 1, expectedUserId, mapUserId || scopedUserId);
+    }
+  });
+  return out;
+}
+
+/** Membership state for one candidate object. */
+function kugouMembershipRecordState(value) {
+  if (!value || typeof value !== 'object') return null;
+  const vipType = firstPositiveNumber(value, KUGOU_VIP_TYPE_KEYS);
+  const svipType = firstPositiveNumber(value, KUGOU_SVIP_TYPE_KEYS);
+  const vipExpiry = firstTimeValue(value, KUGOU_VIP_EXPIRY_SOURCE_KEYS);
+  const svipExpiry = firstTimeValue(value, KUGOU_SVIP_EXPIRY_SOURCE_KEYS);
+  const musicPackageExpiry = firstTimeValue(value, KUGOU_MUSIC_PACKAGE_EXPIRY_SOURCE_KEYS);
+  const webRole = firstPositiveNumber(value, KUGOU_WEB_ROLE_KEYS);
+  const known = webRole > 0 || vipType > 0 || svipType > 0 ||
+    Object.prototype.hasOwnProperty.call(value, 'isVip') ||
+    Object.prototype.hasOwnProperty.call(value, 'is_vip') ||
+    Object.prototype.hasOwnProperty.call(value, 'isSvip') ||
+    vipExpiry.present || svipExpiry.present || musicPackageExpiry.present;
+  if (!known) return null;
+
+  const isSvip = svipExpiry.future || (svipType > 0 && !svipExpiry.present) ||
+    (value.isSvip === true && !svipExpiry.present) ||
+    (KUGOU_WEB_SVIP_ROLES.has(webRole) && (!vipExpiry.present || vipExpiry.future));
+  const isVip = isSvip || vipExpiry.future || (vipType > 0 && !vipExpiry.present) ||
+    (value.isVip === true && !vipExpiry.present) ||
+    (value.is_vip === true && !vipExpiry.present) ||
+    (KUGOU_WEB_VIP_ROLES.has(webRole) && (!vipExpiry.present || vipExpiry.future));
+  const hasMusicPackage = (KUGOU_WEB_MUSIC_PACKAGE_ROLES.has(webRole) && (!musicPackageExpiry.present || musicPackageExpiry.future)) ||
+    musicPackageExpiry.future;
+  return {
+    known: true,
+    isVip,
+    isSvip,
+    vipType,
+    svipType,
+    hasMusicPackage,
+    expiresAt: Math.max(
+      isVip ? vipExpiry.expiresAt || 0 : 0,
+      isSvip ? svipExpiry.expiresAt || 0 : 0,
+    ),
+  };
+}
+
+/** Aggregate membership from any vip API payload. */
+function normalizeKugouVipPayload(payload, userid) {
+  const data = payload && (payload.data || payload.result || payload.vip || payload) || {};
+  const objects = collectKugouVipObjects(data, [], 0, String(userid || '').replace(/\D/g, ''), '');
+  const states = objects.map(kugouMembershipRecordState).filter(Boolean);
+  const active = states.filter((s) => s.isVip);
+  const isSvip = active.some((s) => s.isSvip);
+  const isVip = isSvip || active.length > 0;
+  const vipType = active.reduce((m, s) => Math.max(m, s.vipType || 0), 0);
+  const svipType = active.reduce((m, s) => Math.max(m, s.svipType || 0), 0);
+  const hasMusicPackage = states.some((s) => s.hasMusicPackage);
+  return {
+    membershipKnown: states.length > 0,
+    isVip,
+    isSvip,
+    vipType,
+    svipType,
+    vipLevel: isSvip ? 'svip' : (isVip ? 'vip' : 'none'),
+    hasMusicPackage,
+  };
+}
+
+/** Probe vip endpoints — roleinfo first, then gateway fallback chain. */
+export async function fetchKugouVipInfo(cookie, force) {
+  try {
+    const { pool } = kugouIdentity(cookie);
+    const userid = String(pool.userid || '');
+    const key = kugouVipCacheKey(pool);
+    const cached = vipCache.get(key);
+    if (!force && cached && Date.now() - cached.at < 5 * 60 * 1000) return cached;
+
+    const fallbackResult = { membershipKnown: false, isVip: false, isSvip: false, vipType: 0, svipType: 0, vipLevel: 'none', hasMusicPackage: false };
+    const h5Headers = {
+      Accept: 'application/json, text/javascript, */*; q=0.01',
+      Referer: 'https://vip.kugou.com/',
+      'User-Agent': KUGOU_H5_UA,
+      'X-Requested-With': 'XMLHttpRequest',
+      Cookie: poolToCookieString(pool),
+    };
+
+    // 1) roleinfo (web)
+    try {
+      const url = new URL(KUGOU_VIP_ROLEINFO_URL);
+      url.searchParams.set('n', String(Date.now()));
+      const res = await fetch(url.toString(), { headers: h5Headers, signal: AbortSignal.timeout(2500) });
+      const json = await res.json().catch(() => null);
+      const member = normalizeKugouVipPayload(json, userid);
+      if (member.membershipKnown) {
+        const result = { ...member, role: firstPositiveNumber(json?.data || json, KUGOU_WEB_ROLE_KEYS) };
+        vipCache.set(key, { ...result, at: Date.now() });
+        return result;
+      }
+    } catch { /* fall through */ }
+
+    // 2) gateway vip endpoints fallback chain
+    const attempts = [
+      ['https://gateway.kugou.com', '/v1/get_union_vip', { busi_type: 'concept' }],
+      ['https://gateway.kugou.com', '/v1/vipuser_sub', { busi_type: 'concept' }],
+      ['https://gateway.kugou.com', '/kugouvip/v2/batch_union_vipinfo', { busi_type: 'concept', userids: userid }],
+      ['https://gateway.kugou.com', '/kugouvip/v1/batch_union_vipinfo', { busi_type: 'concept', userids: userid }],
+      ['https://gateway.kugou.com', '/mobile/vipinfo', { plat: 0 }],
+      ['https://kugouvip.kugou.com', '/v1/get_union_vip', { busi_type: 'concept' }],
+    ];
+    for (const [base, path, params] of attempts) {
+      try {
+        const u = new URL(path, base);
+        Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
+        const res = await fetch(u.toString(), { headers: h5Headers, signal: AbortSignal.timeout(2500) });
+        const json = await res.json().catch(() => null);
+        const member = normalizeKugouVipPayload(json, userid);
+        if (member.membershipKnown) {
+          const result = { ...member, role: 0 };
+          vipCache.set(key, { ...result, at: Date.now() });
+          return result;
+        }
+      } catch { /* try next */ }
+    }
+
+    vipCache.set(key, { ...fallbackResult, at: Date.now() });
+    return fallbackResult;
+  } catch {
+    return { membershipKnown: false, isVip: false, isSvip: false, vipType: 0, svipType: 0, vipLevel: 'none', hasMusicPackage: false };
+  }
+}
+
 async function resolveRelateGoodsUrl(relateGoods) {
   if (!Array.isArray(relateGoods) || !relateGoods.length) return null;
   const sorted = relateGoods.slice().sort((a, b) => (b.info?.bitrate || 0) - (a.info?.bitrate || 0));
@@ -348,14 +563,60 @@ async function fetchKugouPrivilegeLite(ctx, cookieStr) {
         qualities: ['128', '320', 'flac', 'high'],
       },
     });
+    // Capture quality-tier hashes from relate_goods (128k/320k/lossless/hires)
+    // so the H5 gateway can be queried per-tier — same song, different file hash.
+    const item = (Array.isArray(json?.data) ? json.data : [json?.data])[0];
+    if (item) {
+      // album_audio_id is required by the H5 gateway for tier hashes to resolve
+      if (!ctx.albumAudioId || String(ctx.albumAudioId) === '0') {
+        const aid = item.album_audio_id || item.audio_id || '';
+        if (aid) ctx.albumAudioId = String(aid);
+      }
+      if (Array.isArray(item.relate_goods) && item.relate_goods.length) {
+        const tiers = item.relate_goods
+          .map((g) => ({
+            hash: String(g.hash || '').toLowerCase(),
+            bitrate: Number(g.info?.bitrate) || 0,
+            filesize: Number(g.info?.filesize) || 0,
+          }))
+          .filter((t) => /^[a-f0-9]{32}$/.test(t.hash))
+          .sort((a, b) => b.bitrate - a.bitrate);
+        if (tiers.length) ctx.qualityHashes = tiers;
+      }
+    }
     return extractPrivilegePlayUrl(json);
   } catch {
     return null;
   }
 }
 
-/** Resolve a playable stream URL (needs bound user cookie + VIP credentials). */
-export async function getKugouPlayUrl(songId, cookie, sessionKey) {
+/** Probe privilege tiers (320k/lossless/hires) and try the H5 gateway on each
+ * tier hash — returns the best URL the cookie allows, or null to continue.
+ * The privilege call also backfills ctx.albumAudioId / ctx.qualityHashes.
+ */
+async function fetchKugouHigherTierUrl(ctx, cookieStr, primaryHash, requested, isVip) {
+  // Probe privilege (populates ctx.qualityHashes + ctx.albumAudioId)
+  const low = await fetchKugouPrivilegeLite(ctx, cookieStr);
+  const tierHashes = (ctx.qualityHashes || []).filter((t) => t.hash && t.hash !== primaryHash);
+  if (!tierHashes.length) return null;
+  for (const { level, quality } of qualityChainFor(requested, isVip)) {
+    const minBitrate = quality === 128 ? 0 : (quality === 320 ? 192 : 700);
+    for (const t of tierHashes.filter((x) => x.bitrate >= minBitrate)) {
+      const higher = await fetchKugouH5PlayUrl({ ...ctx, hash: t.hash, quality, level }, cookieStr);
+      if (higher) return higher;
+    }
+  }
+  // No tier URL — fall back to the 128k URL privilege gave us (cheaper than re-requesting)
+  return low || null;
+}
+
+/** Resolve a playable stream URL (needs bound user cookie + VIP credentials).
+ * @param {string} songId - hash | album_audio_id | album_id
+ * @param {string} cookie - KuGou web cookie
+ * @param {string} [sessionKey] - optional session key to persist refreshed cookie
+ * @param {object} [opts] - { quality: 'standard'|'exhigh'|'lossless'|'hires' }
+ */
+export async function getKugouPlayUrl(songId, cookie, sessionKey, opts = {}) {
   if (!cookie || !songId) return null;
   const { hash, albumAudioId, albumId } = parseSongIdParts(songId);
   if (!/^[a-f0-9]{32}$/.test(hash)) return null;
@@ -385,11 +646,34 @@ export async function getKugouPlayUrl(songId, cookie, sessionKey) {
     }
   }
 
+  // VIP authority: refreshKugouToken response carries vip_type/vip_token
+  // (e.g. vip_type=6 = SVIP). roleinfo probe chain is a fallback only.
+  const poolVipType = Number(pool.vip_type) || 0;
+  const vipInfo = poolVipType > 0
+    ? {
+        membershipKnown: true,
+        isVip: true,
+        isSvip: poolVipType >= 6,
+        vipType: poolVipType,
+        svipType: poolVipType >= 6 ? poolVipType : 0,
+        vipLevel: poolVipType >= 6 ? 'svip' : 'vip',
+        hasMusicPackage: false,
+      }
+    : await fetchKugouVipInfo(activeCookie);
+  const isVip = !!vipInfo.isVip;
+
   const dfid = !pool.dfid || pool.dfid === '-' ? randomDfid() : pool.dfid;
   pool.dfid = dfid;
 
-  let ctx = { pool, identity, dfid, hash, albumAudioId, albumId };
+  let ctx = { pool, identity, dfid, hash, albumAudioId, albumId, vipInfo, isVip };
   ctx = await enrichPlayContext(ctx);
+
+  // Quality-tier upgrade FIRST: probe privilege for tier hashes (320k/lossless/hires)
+  // and query the H5 gateway on those hashes — returns the best the cookie allows.
+  // Run before the cheaper paths so they can't short-circuit with 128k.
+  const requested = normalizeQualityPreference(opts.quality);
+  const tierUrl = await fetchKugouHigherTierUrl(ctx, activeCookie, hash, requested, isVip);
+  if (tierUrl) return tierUrl;
 
   if (ctx.songinfoPlayUrl) return ctx.songinfoPlayUrl;
 
@@ -400,8 +684,10 @@ export async function getKugouPlayUrl(songId, cookie, sessionKey) {
   if (url) return url;
 
   // Mineradio-style paths — H5 gateway first (browser identity, VIP-capable)
-  url = await fetchKugouH5PlayUrl(ctx, activeCookie);
-  if (url) return url;
+  for (const { level, quality } of qualityChainFor(requested, isVip)) {
+    url = await fetchKugouH5PlayUrl({ ...ctx, quality, level }, activeCookie);
+    if (url) return url;
+  }
 
   url = await fetchKugouMobilePlayUrl(ctx, activeCookie);
   if (url) return url;
@@ -429,6 +715,33 @@ export async function getKugouPlayUrl(songId, cookie, sessionKey) {
   // Legacy trial URLs often 403 for VIP tracks — skip when logged in
   if (!pool.userid && !pool.vip_token) return fetchKugouLegacyV2(hash);
   return null;
+}
+
+/** Normalize a quality preference to a known level. */
+function normalizeQualityPreference(q) {
+  q = String(q || 'standard').toLowerCase();
+  if (['jymaster', 'hires', 'lossless', 'exhigh', 'standard'].includes(q)) return q;
+  return 'standard';
+}
+
+/** Map a quality level to the KuGou quality param used by H5 gateway. */
+function kugouQualityParam(level) {
+  if (level === 'jymaster' || level === 'hires') return 'hires';
+  if (level === 'lossless') return 'flac';
+  if (level === 'exhigh') return 320;
+  return 128;
+}
+
+/** Build the ordered quality chain to attempt.
+ * No pre-gating on VIP: the H5 gateway cookie carries rights; we simply try
+ * each quality and use whatever the server grants (fallback downward).
+ */
+function qualityChainFor(requested, isVip) {
+  const levels = ['jymaster', 'hires', 'lossless', 'exhigh', 'standard'];
+  const startIdx = Math.max(0, levels.indexOf(requested));
+  const allowed = levels.slice(startIdx);
+  if (!allowed.length) return [{ level: 'standard', quality: 128 }];
+  return allowed.map((level) => ({ level, quality: kugouQualityParam(level) }));
 }
 
 async function fetchKugouWebPlayUrl(ctx) {
