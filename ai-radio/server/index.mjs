@@ -1,7 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { Readable } from 'stream';
-import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie } from './ncm.mjs';
+import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie, isPlayableUrl } from './ncm.mjs';
 import { getUrlNetease } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
@@ -13,6 +14,9 @@ import { createSession, getSession, updateSessionCookie, ensureFreshSession } fr
 import { ok, fail, Err } from './response.mjs';
 import { recordUrlResult, recordPlayResult, getMetrics } from './metrics.mjs';
 import { queueAdd, playerPlay, getPlayerStatus } from './playerState.mjs';
+import { readFileSync, existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -75,7 +79,10 @@ app.get('/api/music/url', async function(req, res) {
  */
 app.get('/api/music/url-smart', async function(req, res) {
   const id = req.query.id || '';
-  const sources = req.query.sources ? req.query.sources.split(',') : ['netease', 'kugou'];
+  // Drop kuwo — Meting returns non-URL error JSON that used to leak into <audio>
+  const sources = (req.query.sources ? req.query.sources.split(',') : ['netease', 'kugou'])
+    .map((s) => String(s).trim())
+    .filter((s) => s && s !== 'kuwo');
   const keyword = req.query.q || '';
   const key = req.query.key || '';
   if (!id) return res.status(400).json({ error: 'missing query param id' });
@@ -106,16 +113,16 @@ app.get('/api/music/url-smart', async function(req, res) {
     }
 
     // Exact playlist ids must not cross-source search-fallback
-    if (!url && !String(id).includes('|')) {
+    if (!isPlayableUrl(url) && !String(id).includes('|')) {
       url = await getUrlSmart(id, sources, keyword, kugouCookie);
     }
 
-    if (!url) {
+    if (!isPlayableUrl(url)) {
       recordUrlResult(false);
       return res.status(404).json({ error: 'no url found from any source' });
     }
     recordUrlResult(true);
-    res.json({ url });
+    res.json({ url: String(url).trim() });
   } catch (e) {
     recordUrlResult(false);
     res.status(500).json({ error: e.message });
@@ -405,6 +412,28 @@ app.post('/api/session/bind', express.json(), async function(req, res) {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Import KuGou web cookie saved by Mineradio desktop (%APPDATA%/Mineradio/.kugou-cookie)
+app.get('/api/login/kugou/import-mineradio', async function(req, res) {
+  const candidates = [
+    join(process.env.APPDATA || '', 'Mineradio', '.kugou-cookie'),
+    join(homedir(), 'AppData', 'Roaming', 'Mineradio', '.kugou-cookie'),
+  ];
+  for (const file of candidates) {
+    try {
+      if (!existsSync(file)) continue;
+      const cookie = normalizeCookieInput(readFileSync(file, 'utf8'));
+      if (!cookie) continue;
+      const user = verifyKugouCookie(cookie);
+      process.env.KUGOU_COOKIE = cookie;
+      const key = createSession('kugou', cookie, user);
+      return res.json({ ok: true, key, platform: 'kugou', user, source: file });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  }
+  res.status(404).json({ error: '未找到 Mineradio 酷狗登录文件（请先用 Mineradio 扫码登录，或直接粘贴 cookie）' });
 });
 
 // ===== Playlists =====

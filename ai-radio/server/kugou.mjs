@@ -3,7 +3,7 @@
  */
 import { parseCookie } from './session.mjs';
 import {
-  kugouAndroidRequest, kugouIdentity, decodeKugouNickName, signKey, poolToCookieString, randomDfid,
+  kugouAndroidRequest, kugouH5Request, kugouIdentity, decodeKugouNickName, signKey, poolToCookieString, randomDfid,
   md5, signatureAndroidParams, signatureWebParams, KUGOU_SRCAPPID,
 } from './kugouSign.mjs';
 import { refreshKugouToken, isKugouAuthError } from './kugouLogin.mjs';
@@ -177,6 +177,19 @@ const KUGOU_TRACKER_UA = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
 const KUGOU_APPID = 1005;
 const KUGOU_CLIENTVER = 20489;
 const KUGOU_V6_KEY_SALT = '185672dd44712f60bb1736df5a377e82';
+// Mineradio-style H5/Web play path constants
+const KUGOU_WEB_APPID = 1014;
+const KUGOU_H5_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt';
+const KUGOU_H5_SRC_APPID = '2919';
+const KUGOU_H5_CLIENTVER = '20000';
+const KUGOU_H5_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const KUGOU_PLAY_MOBILE = 'http://m.kugou.com/app/i/getSongInfo.php';
+const KUGOU_PLAY_WEB = 'https://wwwapi.kugou.com/yy/index.php';
+const KUGOU_GATEWAY = 'https://gateway.kugou.com';
+const KUGOU_HEADERS = {
+  Referer: 'https://www.kugou.com/',
+  'User-Agent': KUGOU_H5_UA,
+};
 
 async function resolveRelateGoodsUrl(relateGoods) {
   if (!Array.isArray(relateGoods) || !relateGoods.length) return null;
@@ -310,16 +323,13 @@ async function fetchKugouWebPlayUrlWithEncode(ctx) {
 
 /** Authenticated privilege/lite — unlocks VIP tracks for logged-in users. */
 async function fetchKugouPrivilegeLite(ctx, cookieStr) {
-  const { hash, albumAudioId, albumId } = ctx;
+  const { hash, albumId } = ctx;
   const resource = {
     type: 'audio',
     page_id: 0,
     hash,
     album_id: Number(albumId) || 0,
   };
-  if (albumAudioId && albumAudioId !== '0') {
-    resource.album_audio_id = albumAudioIdForApi(albumAudioId);
-  }
   try {
     const json = await kugouAndroidRequest({
       cookie: cookieStr,
@@ -327,8 +337,10 @@ async function fetchKugouPrivilegeLite(ctx, cookieStr) {
       url: '/v2/get_res_privilege/lite',
       router: 'media.store.kugou.com',
       body: {
+        appid: KUGOU_APPID,
         area_code: 1,
         behavior: 'play',
+        clientver: KUGOU_CLIENTVER,
         need_hash_offset: 1,
         relate: 1,
         support_verify: 1,
@@ -385,6 +397,16 @@ export async function getKugouPlayUrl(songId, cookie, sessionKey) {
   if (url) return url;
 
   url = await fetchKugouPrivilegeLite(ctx, activeCookie);
+  if (url) return url;
+
+  // Mineradio-style paths — H5 gateway first (browser identity, VIP-capable)
+  url = await fetchKugouH5PlayUrl(ctx, activeCookie);
+  if (url) return url;
+
+  url = await fetchKugouMobilePlayUrl(ctx, activeCookie);
+  if (url) return url;
+
+  url = await fetchKugouWebPlayData(ctx, activeCookie);
   if (url) return url;
 
   for (const pageId of [151369488, 1]) {
@@ -483,14 +505,14 @@ async function fetchKugouPrivUrlV6(ctx, opts = {}) {
   const bodyObj = {
     area_code: '1',
     behavior: 'play',
-    qualities: ['128', '320', 'flac', 'high'],
+    qualities: ['128', '320', 'flac', 'high', 'multitrack', 'viper_atmos', 'viper_tape', 'viper_clear', 'super'],
     resource: {
       album_audio_id: albumAudioIdForApi(albumAudioId),
       collect_list_id: '3',
       collect_time: clienttimeMs,
       hash,
       id: 0,
-      page_id: pageId,
+      page_id: 1,
       type: 'audio',
     },
     token: identity.token,
@@ -509,7 +531,8 @@ async function fetchKugouPrivUrlV6(ctx, opts = {}) {
       viptoken: pool.vip_token || pool.token || '',
     },
     userid: `${userid}`,
-    vip: Number(pool.vip_type) || 6,
+    // vip must be a STRING (upstream passes cookie vip_type as-is) — number breaks unmarshal
+    vip: String(pool.vip_type || 0),
   };
   const bodyStr = JSON.stringify(bodyObj);
   const params = {
@@ -568,6 +591,9 @@ async function fetchKugouLegacyV2(hash) {
 async function fetchKugouTrackerUrl(opts) {
   const { pool, identity, dfid, hash, albumAudioId, albumId, quality } = opts;
   const clienttime = Math.floor(Date.now() / 1000);
+  // Upstream song_url.js: Number() fallbacks — undefined album ids break v5/url signature
+  const albumIdNum = Number(albumId) || 0;
+  const albumAudioIdNum = Number(albumAudioId) || 0;
   const params = {
     dfid,
     mid: identity.mid,
@@ -577,14 +603,14 @@ async function fetchKugouTrackerUrl(opts) {
     clienttime,
     token: identity.token,
     userid: Number(identity.userid) || 0,
-    album_id: albumId,
+    album_id: albumIdNum,
     area_code: 1,
     hash,
     ssa_flag: 'is_fromtrack',
     version: 11430,
     page_id: 151369488,
     quality,
-    album_audio_id: albumAudioId,
+    album_audio_id: albumAudioIdNum,
     behavior: 'play',
     pid: 2,
     cmd: 26,
@@ -633,6 +659,120 @@ async function fetchKugouTrackerUrl(opts) {
   return null;
 }
 
+// ===== Mineradio-style play paths (H5 gateway / mobile getSongInfo / web play/getdata) =====
+// These are the paths a working desktop client (Mineradio) uses for VIP tracks.
+
+function signatureH5Params(params) {
+  const parts = Object.keys(params).sort().map(key => `${key}=${params[key]}`);
+  return md5(`${KUGOU_H5_SALT}${parts.join('')}${KUGOU_H5_SALT}`);
+}
+
+function buildKugouH5Params(pool, identity, extra) {
+  const now = Date.now();
+  return Object.assign({
+    srcappid: KUGOU_H5_SRC_APPID,
+    clientver: KUGOU_H5_CLIENTVER,
+    clienttime: now,
+    mid: identity.mid || pool.kg_mid || '-',
+    uuid: now,
+    dfid: pool.dfid || '-',
+    appid: KUGOU_WEB_APPID,
+    token: identity.token || '',
+    userid: Number(identity.userid) || 0,
+  }, extra || {});
+}
+
+/** H5 gateway v5/url — browser-identity path (works for VIP with logged cookie). */
+async function fetchKugouH5PlayUrl(ctx, cookieStr) {
+  const { pool, identity, dfid, hash, albumAudioId, albumId, quality } = ctx;
+  const q = quality || 128;
+  const params = buildKugouH5Params(pool, identity, {
+    album_id: Number(albumId) || 0,
+    area_code: 1,
+    hash,
+    ssa_flag: 'is_fromtrack',
+    version: 11430,
+    quality: q,
+    album_audio_id: Number(albumAudioId) || 0,
+    behavior: 'play',
+    pid: 2,
+    cmd: 26,
+    pidversion: 3001,
+    IsFreePart: 0,
+    cdnBackup: 1,
+    module: '',
+  });
+  params.key = signKey(hash, identity.mid || pool.kg_mid || '', Number(identity.userid) || 0, KUGOU_WEB_APPID);
+  params.signature = signatureH5Params(params);
+  const u = new URL('/v5/url', KUGOU_GATEWAY);
+  Object.keys(params).forEach(k => u.searchParams.set(k, String(params[k])));
+  try {
+    const res = await fetch(u.toString(), {
+      headers: {
+        ...KUGOU_HEADERS,
+        'x-router': 'trackercdn.kugou.com',
+        Cookie: poolToCookieString(pool),
+      },
+    });
+    const json = await res.json();
+    return extractPlayUrl(json) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Mobile getSongInfo.php — classic mobile play path. */
+async function fetchKugouMobilePlayUrl(ctx, cookieStr) {
+  const { pool, identity, hash, albumId } = ctx;
+  const key = md5(`${hash}kgcloud`);
+  const u = new URL(KUGOU_PLAY_MOBILE);
+  u.searchParams.set('cmd', 'playInfo');
+  u.searchParams.set('hash', hash);
+  u.searchParams.set('key', key);
+  u.searchParams.set('album_id', albumId || '0');
+  u.searchParams.set('pid', '1');
+  u.searchParams.set('forceDown', '0');
+  u.searchParams.set('vip', pool.vip_type ? '1' : '65530');
+  if (identity.userid) u.searchParams.set('userid', identity.userid);
+  if (identity.token) u.searchParams.set('token', identity.token);
+  try {
+    const res = await fetch(u.toString(), {
+      headers: { ...KUGOU_HEADERS, Cookie: poolToCookieString(pool) },
+    });
+    const json = await res.json();
+    return extractPlayUrl(json) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Web play/getdata — wwwapi index.php play/getdata path. */
+async function fetchKugouWebPlayData(ctx, cookieStr) {
+  const { pool, identity, hash, albumAudioId, albumId } = ctx;
+  const u = new URL(KUGOU_PLAY_WEB);
+  u.searchParams.set('r', 'play/getdata');
+  u.searchParams.set('hash', hash);
+  u.searchParams.set('album_id', albumId || '0');
+  if (albumAudioId) u.searchParams.set('album_audio_id', albumAudioId);
+  u.searchParams.set('appid', String(KUGOU_WEB_APPID));
+  u.searchParams.set('platid', '4');
+  u.searchParams.set('mid', identity.mid || pool.kg_mid || '-');
+  u.searchParams.set('dfid', pool.dfid || '-');
+  u.searchParams.set('userid', identity.userid || '0');
+  u.searchParams.set('token', identity.token || '');
+  try {
+    const res = await fetch(u.toString(), {
+      headers: { ...KUGOU_HEADERS, Cookie: poolToCookieString(pool) },
+    });
+    const json = await res.json();
+    const data = json && json.data;
+    const url = data && (data.play_url || data.play_backup_url);
+    return url ? String(url).replace(/\\\//g, '/').trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch all pages from a paginated KuGou cloudlist endpoint. */
 async function fetchAllPages(fetchPage) {
   const all = [];
@@ -671,33 +811,34 @@ async function withKugouCookie(cookie, fn) {
 }
 
 /**
- * Get a user's playlists from KuGou cloudlist (/v7/get_all_list).
+ * Get a user's playlists from KuGou cloudlist (/v7/get_all_list) via H5 gateway.
+ * Web cookie works directly — no login_by_token refresh needed.
  */
 export async function getKugouPlaylistsByCookie(cookie) {
-  const { value, cookie: outCookie } = await withKugouCookie(cookie, async (activeCookie) => {
-    const { userid, token } = kugouIdentity(activeCookie);
+  const { userid, token } = kugouIdentity(cookie);
 
-    const lists = await fetchAllPages(async (page, pagesize) => {
-      const json = await kugouAndroidRequest({
-        cookie: activeCookie,
-        method: 'POST',
-        url: '/v7/get_all_list',
-        router: 'cloudlist.service.kugou.com',
-        query: { plat: 1, userid: Number(userid), token },
-        body: {
-          userid: Number(userid),
-          token,
-          total_ver: 979,
-          type: 2,
-          page,
-          pagesize,
-        },
-      });
-      const data = json.data || {};
-      return data.info || data.lists || data.list || [];
+  const lists = await fetchAllPages(async (page, pagesize) => {
+    const json = await kugouH5Request({
+      cookie,
+      method: 'POST',
+      path: '/v7/get_all_list',
+      router: 'cloudlist.service.kugou.com',
+      query: { plat: 1 },
+      body: {
+        userid: Number(userid),
+        token,
+        total_ver: 979,
+        type: 2,
+        page,
+        pagesize,
+      },
     });
+    const data = json.data || {};
+    return data.info || data.lists || data.list || [];
+  });
 
-    return lists.map((p) => ({
+  return {
+    playlists: lists.map((p) => ({
       id: String(p.listid || p.specialid || p.global_collection_id || ''),
       name: p.listname || p.name || p.title || '未命名歌单',
       cover: playlistCover(p),
@@ -706,47 +847,47 @@ export async function getKugouPlaylistsByCookie(cookie) {
       description: p.intro || p.desc || '',
       creator: p.nickname || p.username || '',
       source: 'kugou',
-    })).filter((p) => p.id);
-  });
-  return { playlists: value, cookie: outCookie };
+    })).filter((p) => p.id),
+    cookie,
+  };
 }
 
 /**
- * Get tracks of a KuGou playlist (/v4/get_list_all_file).
+ * Get tracks of a KuGou playlist (/v4/get_list_all_file) via H5 gateway.
  * @param {string} listId - numeric listid from get_all_list
  */
 export async function getKugouTracksByCookie(listId, cookie) {
   if (!listId) throw new Error('缺少歌单 ID');
-  const { value, cookie: outCookie } = await withKugouCookie(cookie, async (activeCookie) => {
-    const { userid, token } = kugouIdentity(activeCookie);
-    const listid = Number(listId);
-    if (!listid) throw new Error('酷狗歌单 ID 无效');
+  const { userid, token } = kugouIdentity(cookie);
+  const listid = Number(listId);
+  if (!listid) throw new Error('酷狗歌单 ID 无效');
 
-    const songs = await fetchAllPages(async (page, pagesize) => {
-      const json = await kugouAndroidRequest({
-        cookie: activeCookie,
-        method: 'POST',
-        url: '/v4/get_list_all_file',
-        router: 'cloudlist.service.kugou.com',
-        body: {
-          listid,
-          userid: Number(userid),
-          token,
-          area_code: 1,
-          show_relate_goods: 0,
-          pagesize,
-          allplatform: 1,
-          show_cover: 1,
-          type: 0,
-          page,
-        },
-      });
-      const data = json.data || {};
-      return data.info || data.songs || data.files || data.lists || [];
+  const songs = await fetchAllPages(async (page, pagesize) => {
+    const json = await kugouH5Request({
+      cookie,
+      method: 'POST',
+      path: '/v4/get_list_all_file',
+      router: 'cloudlist.service.kugou.com',
+      body: {
+        listid,
+        userid: Number(userid),
+        token,
+        area_code: 1,
+        show_relate_goods: 0,
+        pagesize,
+        allplatform: 1,
+        show_cover: 1,
+        type: 0,
+        page,
+      },
     });
+    const data = json.data || {};
+    return data.info || data.songs || data.files || data.lists || [];
+  });
 
-    const fallbackCover = '';
-    return songs.map((t) => {
+  const fallbackCover = '';
+  return {
+    tracks: songs.map((t) => {
       const { title, artist } = trackTitleAndArtist(t);
       return {
         id: trackId(t),
@@ -756,7 +897,7 @@ export async function getKugouTracksByCookie(listId, cookie) {
         duration: trackDurationSec(t),
         source: 'kugou',
       };
-    }).filter((t) => t.id);
-  });
-  return { tracks: value, cookie: outCookie };
+    }).filter((t) => t.id),
+    cookie,
+  };
 }

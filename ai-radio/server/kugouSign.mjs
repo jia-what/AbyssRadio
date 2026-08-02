@@ -172,6 +172,69 @@ export function signKey(hash, mid, userid, appid = APPID) {
   return md5(`${hash}${salt}${appid}${mid}${userid || 0}`);
 }
 
+/** H5/Web signature: MD5(salt + sorted(key=value...) + JSON.stringify(body) + salt). Body MUST participate. */
+export function signatureH5Params(params, bodyObj = null) {
+  const parts = Object.keys(params).sort().map((key) => `${key}=${params[key]}`);
+  if (bodyObj && typeof bodyObj === 'object') parts.push(JSON.stringify(bodyObj));
+  return md5(`${WEB_SALT}${parts.join('')}${WEB_SALT}`);
+}
+
+/**
+ * H5 gateway request — browser-identity path (appid=1014).
+ * Works for VIP tracks AND cloudlist APIs with the full web cookie (no login_by_token refresh needed).
+ */
+export async function kugouH5Request(opts) {
+  const { pool, ...identity } = kugouIdentity(opts.cookie);
+  const method = (opts.method || 'GET').toUpperCase();
+  const bodyObj = opts.body || null;
+  const bodyText = bodyObj ? JSON.stringify(bodyObj) : '';
+  const now = Date.now();
+  const params = {
+    srcappid: KUGOU_SRCAPPID,
+    clientver: '20000',
+    clienttime: now,
+    mid: identity.mid || pool.kg_mid || '-',
+    uuid: now,
+    dfid: pool.dfid || '-',
+    appid: 1014,
+    token: identity.token || '',
+    userid: Number(identity.userid) || 0,
+    ...(opts.query || {}),
+  };
+  params.signature = signatureH5Params(params, bodyObj);
+
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) qs.set(k, String(v));
+  }
+  const urls = opts.router
+    ? [`${GATEWAY}${opts.path}?${qs.toString()}`, `http://${opts.router}${opts.path}?${qs.toString()}`]
+    : [`${GATEWAY}${opts.path}?${qs.toString()}`];
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Referer: 'https://www.kugou.com/',
+    Cookie: poolToCookieString(pool),
+  };
+  if (opts.router) headers['x-router'] = opts.router;
+  if (bodyText) headers['Content-Type'] = 'application/json';
+
+  let lastErr;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { method, headers, body: bodyText || undefined });
+      const json = await res.json();
+      if (json.status === 0 || (json.error_code && json.error_code !== 0)) {
+        throw new Error(formatKugouError(json));
+      }
+      return json;
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  throw lastErr;
+}
+
 /** Android signature: MD5(salt + sorted(key=value...) + body + salt) */
 export function signatureAndroidParams(params, body = '') {
   const bodyStr = typeof body === 'string' ? body : (body ? JSON.stringify(body) : '');
