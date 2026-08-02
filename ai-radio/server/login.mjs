@@ -95,17 +95,24 @@ export async function checkQr(key) {
       createOption({ key, cookie: pending?.deviceCookie, crypto: 'weapi' }),
     );
   } catch (err) {
-    if (isRateLimited(err)) {
+    const body = err?.body || {};
+    const code = Number(body.code) || 0;
+    // Prefer real QR progress (802 scanned / 803 confirm) over rate-limit rewrite
+    if (code === 802 || code === 803) {
+      return { code, message: body.message || body.msg };
+    }
+    if (code === 800) {
+      pendingQr.delete(key);
+      return { code: 800, message: body.message || body.msg };
+    }
+    if (isRateLimited(err) || code === 406) {
       return { code: 801, message: '操作频繁，请稍候再试' };
     }
-    const body = err?.body || {};
-    const code = body.code || 801;
-    if (code === 800) pendingQr.delete(key);
-    return { code, message: body.message || body.msg };
+    return { code: code || 801, message: body.message || body.msg };
   }
 
   const body = result?.body || {};
-  const code = body.code || 801;
+  const code = Number(body.code) || 801;
 
   if (code === 406 || isRateLimited({ body, status: code })) {
     return { code: 801, message: '操作频繁，请稍候再试' };
@@ -121,11 +128,13 @@ export async function checkQr(key) {
       sessions.set(key, { cookie: cookieStr, loginAt: Date.now() });
       return { code: 200, cookie: cookieStr };
     }
-    return { code: 803 };
+    // Cookie not yet in response — keep client on confirm step
+    return { code: 803, message: '请在手机上确认登录' };
   }
 
   if (code === 800) pendingQr.delete(key);
-  return { code };
+  // 801 waiting / 802 scanned / 803 confirming — pass through with message
+  return { code, message: body.message || body.msg };
 }
 
 export function getSessionCookie(key) {

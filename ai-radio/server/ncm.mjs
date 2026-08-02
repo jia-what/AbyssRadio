@@ -100,17 +100,22 @@ export async function getUrl(songId, source) {
   return extractUrlFromRaw(raw);
 }
 
+/** Only accept real stream URLs — reject error JSON / garbage strings from Meting. */
+export function isPlayableUrl(url) {
+  return typeof url === 'string' && /^https?:\/\//i.test(url.trim());
+}
+
 async function extractKugouUrl(meting, raw) {
   // Try Meting's own decode first (it handles kugou_url_new and kugou_url_legacy)
   try {
     var decoded = await meting.provider.handleDecode('kugou_url_new', raw);
     var p = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
-    if (p.url) return p.url;
+    if (isPlayableUrl(p.url)) return p.url.trim();
   } catch {}
   try {
     var decoded2 = await meting.provider.handleDecode('kugou_url_legacy', raw);
     var p2 = typeof decoded2 === 'string' ? JSON.parse(decoded2) : decoded2;
-    if (p2.url) return p2.url;
+    if (isPlayableUrl(p2.url)) return p2.url.trim();
   } catch {}
   return extractUrlFromRaw(raw);
 }
@@ -131,23 +136,29 @@ export async function getKugouUrlWithCookie(songId, cookie) {
 
 async function extractUrlFromRaw(raw) {
   if (!raw) return null;
+  // Concatenated error blobs like `{"msg":"..."}{"msg":"..."}` fail parse → must NOT return raw
   try {
     var parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed && typeof parsed === 'object' && (parsed.code === 400 || parsed.msg === '参数错误')) {
+      return null;
+    }
     var data = parsed.data || parsed;
     if (Array.isArray(data) && data.length > 0) {
       var item = data[0];
-      if (item.play_url) return item.play_url;
-      if (item.url) return item.url;
+      if (isPlayableUrl(item.play_url)) return item.play_url.trim();
+      if (isPlayableUrl(item.url)) return item.url.trim();
       // KuGou VIP: need to make a second request to trackercdn
       if (item.relate_goods && Array.isArray(item.relate_goods) && item.relate_goods.length > 0) {
         return await kugouVipUrl(item.relate_goods);
       }
     }
-    if (data.play_url) return data.play_url;
-    if (data.url) return data.url;
+    if (data && isPlayableUrl(data.play_url)) return data.play_url.trim();
+    if (data && isPlayableUrl(data.url)) return data.url.trim();
     return null;
   } catch {
-    return typeof raw === 'string' ? raw : null;
+    // Bare URL string (rare) — only accept http(s)
+    if (typeof raw === 'string' && isPlayableUrl(raw)) return raw.trim();
+    return null;
   }
 }
 
@@ -167,7 +178,8 @@ async function kugouVipUrl(relateGoods) {
       var res = await fetch(trackUrl);
       var text = await res.text();
       var json = JSON.parse(text);
-      if (json.url) return Array.isArray(json.url) ? json.url[0] : json.url;
+      var u = Array.isArray(json.url) ? json.url[0] : json.url;
+      if (isPlayableUrl(u)) return String(u).trim();
     } catch {}
   }
   return null;
@@ -188,12 +200,28 @@ function isFeeSong(raw) {
   }
 }
 
+async function tryMetingUrl(src, songKey, kugouCookie) {
+  // Fresh Meting — do NOT use makeMeting() here (it sticky-applies env KUGOU_COOKIE)
+  var meting = new Meting(src);
+  if (src === 'kugou' && kugouCookie) meting.cookie(kugouCookie);
+  else if (src === 'netease' && process.env.NETEASE_COOKIE) meting.cookie(process.env.NETEASE_COOKIE);
+  var id = String(songKey).split('|')[0];
+  var raw = await meting.url(id);
+  var url = src === 'kugou'
+    ? await extractKugouUrl(meting, raw)
+    : await extractUrlFromRaw(raw);
+  return { url: isPlayableUrl(url) ? url : null, raw, trial: isFeeSong(raw) };
+}
+
 /**
  * Single-pass Meting fallback: prefer non-trial URLs, else first playable.
  * Callers should already have tried the authenticated primary source.
+ * kuwo is skipped — Meting returns error JSON strings that are not playable.
  */
 export async function getUrlSmart(songId, sources, searchKeyword, kugouCookie) {
-  var sourcesList = sources || ['netease', 'kugou'];
+  var sourcesList = (sources || ['netease', 'kugou']).filter(function(s) {
+    return s && s !== 'kuwo';
+  });
   var trialFallback = null;
   for (var src of sourcesList) {
     try {
@@ -205,16 +233,14 @@ export async function getUrlSmart(songId, sources, searchKeyword, kugouCookie) {
           if (results && results.length > 0) songKey = results[0].id;
         }
       }
-      var meting = makeMeting(src);
-      if (src === 'kugou' && kugouCookie) meting.cookie(kugouCookie);
-      var id = String(songKey).split('|')[0];
-      var raw = await meting.url(id);
-      var url = src === 'kugou'
-        ? await extractKugouUrl(meting, raw)
-        : await extractUrlFromRaw(raw);
-      if (!url) continue;
-      if (!isFeeSong(raw)) return url;
-      if (!trialFallback) trialFallback = url;
+      var hit = await tryMetingUrl(src, songKey, src === 'kugou' ? kugouCookie : undefined);
+      // Stale/invalid KUGOU_COOKIE often yields garbage — retry anonymous once
+      if (!hit.url && src === 'kugou' && kugouCookie) {
+        hit = await tryMetingUrl(src, songKey, '');
+      }
+      if (!hit.url) continue;
+      if (!hit.trial) return hit.url;
+      if (!trialFallback) trialFallback = hit.url;
     } catch {}
   }
   return trialFallback;

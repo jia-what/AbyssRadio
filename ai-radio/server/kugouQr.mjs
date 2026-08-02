@@ -1,17 +1,20 @@
 /**
  * KuGou QR login — mirrors MakcRe/KuGouMusicApi login_qr_* modules.
+ * Web-mode (appid=1014) returns a WEB token that carries VIP playback rights;
+ * Android-mode (appid=1005) only yields an API token without VIP. Use web mode.
  */
 import QRCode from 'qrcode';
 import { md5, signatureWebParams, KUGOU_SRCAPPID, randomDfid, calculateMid } from './kugouSign.mjs';
 
-const CONFIG_APPID = 1005;
-const QR_APPID = 1001;
-const CLIENTVER = 20489;
-const LOGIN_HOSTS = ['http://login.user.kugou.com', 'https://login-user.kugou.com'];
-const UA = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
+const CONFIG_APPID = 1014;   // web appid — VIP-capable token
+const QR_APPID = 1014;
+const CLIENTVER = 20000;     // web clientver
+const LOGIN_HOSTS = ['https://login-user.kugou.com', 'http://login.user.kugou.com'];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 async function kugouWebGet(path, queryParams) {
-  const clienttime = Math.floor(Date.now() / 1000);
+  // web login JS uses millisecond clienttime (parseInt(new Date().getTime()))
+  const clienttime = Date.now();
   const mid = '-';
   const params = {
     dfid: '-',
@@ -94,11 +97,14 @@ export async function checkKugouQr(qrKey) {
   const guid = md5(`kugou-qr-guid:${userid}:${token}`);
   const apiMid = calculateMid(guid);
   const dfid = randomDfid();
+  // Web-mode cookie: a_id=1014 marks the WEB account — KuGou VIP rights are
+  // tied to this. Android-mode cookies (no a_id) cannot play VIP tracks.
   const cookie = [
     `token=${token}`,
     `userid=${userid}`,
     `KugooID=${userid}`,
     `t=${token}`,
+    `a_id=${CONFIG_APPID}`,
     `kg_mid=${kgMid}`,
     `KUGOU_API_MID=${apiMid}`,
     `KUGOU_API_GUID=${guid}`,

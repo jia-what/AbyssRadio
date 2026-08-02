@@ -65,7 +65,9 @@ function rsaEncryptHex(payload) {
   const keyLen = Math.ceil(publicKey.n.bitLength() / 8);
   const padded = Buffer.alloc(keyLen);
   if (bytes.length > keyLen) throw new Error('RSA payload too large');
-  bytes.copy(padded, keyLen - bytes.length);
+  // Left-aligned zero padding (data at offset 0, zeros at tail) — matches upstream
+  // KuGouMusicApi rsaRawEncrypt (padded.set(buffer)) and what the server expects.
+  bytes.copy(padded, 0);
   const bigInt = new forge.jsbn.BigInteger(padded.toString('hex'), 16);
   const encrypted = bigInt.modPow(publicKey.e, publicKey.n);
   return encrypted.toString(16).padStart(keyLen * 2, '0');

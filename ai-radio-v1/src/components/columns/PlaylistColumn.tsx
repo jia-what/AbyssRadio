@@ -80,14 +80,31 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
       if (pollGen !== pollGenRef.current) return;
       const qrData = await fetchQrImage(pf, keyData.key);
       if (pollGen !== pollGenRef.current) return;
+      if (!qrData.qrimg) {
+        setError('二维码生成失败，请点击刷新');
+        return;
+      }
       setQrImg(qrData.qrimg);
+      // State machine: 801 waiting → 802/803 scanned/confirm → 200 success (keep polling through 802)
       pollRef.current = setInterval(async () => {
         if (loggedInRef.current || pollGen !== pollGenRef.current) return;
         try {
           const check = await checkQrLogin(pf, keyData.key);
           if (loggedInRef.current || pollGen !== pollGenRef.current) return;
-          setQrCode(check.code);
-          if (check.code === 200 && check.key) {
+
+          const code = check.code;
+          const rateLimited = code === 801 && /频繁|稍候/.test(check.message || '');
+
+          // Never regress UI from 802/803 back to 801 on rate-limit noise
+          setQrCode((prev) => {
+            if (rateLimited && (prev === 802 || prev === 803)) return prev;
+            if (code === 802 || code === 803 || code === 800 || code === 200 || code === 801) {
+              return code;
+            }
+            return prev;
+          });
+
+          if (code === 200 && check.key) {
             loggedInRef.current = true;
             stopQrPoll();
             // Keep qrActivePlatformRef set — prevents useEffect from spawning a new QR
@@ -100,20 +117,25 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
             saveStoredBind(result.platform, result.key, result.user);
             setView('playlists');
             await loadPlaylists(result.key);
-          } else if (check.code === 800 && !loggedInRef.current) {
+          } else if (code === 800 && !loggedInRef.current) {
             stopQrPoll();
             setError('二维码已过期，请点击下方刷新');
-          } else if (check.code === 801 && check.message?.includes('频繁')) {
+          } else if (rateLimited) {
             setError('请求过于频繁，请稍候…');
+          } else if (code === 802 || code === 803) {
+            // Keep polling — user must confirm on phone
+            setError('');
           }
         } catch (e) {
+          // Transient network errors: keep polling; do not kill the QR session
           if (loggedInRef.current || pollGen !== pollGenRef.current) return;
-          stopQrPoll();
-          setError(e instanceof Error ? e.message : '登录失败，请点击刷新重试');
+          console.error('[QR poll]', e);
+          setError(e instanceof Error ? e.message : '登录检查失败，仍在重试…');
         }
-      }, 3000);
+      }, 2500);
     } catch (e) {
       if (pollGen !== pollGenRef.current) return;
+      console.error('[QR start]', e);
       setError(e instanceof Error ? e.message : '获取二维码失败');
     }
   }, [loadPlaylists, stopQrPoll, onFocus]);

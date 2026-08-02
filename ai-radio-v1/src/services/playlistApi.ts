@@ -121,8 +121,10 @@ export async function checkQrLogin(platform: Platform, qrKey: string): Promise<Q
   const res = await fetch(
     `/api/login/qr-check?platform=${platform}&key=${encodeURIComponent(qrKey)}`,
   );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || '检查登录状态失败');
+  const data = await res.json().catch(() => ({}));
+  // Backend always returns { code } even on soft failures — prefer that over HTTP throw
+  if (typeof data.code === 'number') return data as QrCheckResult;
+  if (!res.ok) throw new Error(data.error || data.message || '检查登录状态失败');
   return data as QrCheckResult;
 }
 
