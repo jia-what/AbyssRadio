@@ -1,0 +1,50 @@
+{
+  "name": "abyss-radio",
+  "version": "0.1.0",
+  "description": "Abyss Radio - Electron desktop music player (KuGou + NetEase)",
+  "main": "desktop/main.cjs",
+  "author": "Liu Yongkang",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron .",
+    "build:frontend": "cd ai-radio-v1 && npm run build",
+    "start:backend": "cd ai-radio/server && node index.mjs",
+    "build:win": "electron-builder --win nsis",
+    "build:win:dir": "electron-builder --win dir"
+  },
+  "devDependencies": {
+    "electron": "^42.8.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.abyss.radio",
+    "productName": "AbyssRadio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "ai-radio/**/*",
+      "ai-radio-v1/dist/**/*",
+      "!ai-radio-v1/node_modules/**/*"
+    ],
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

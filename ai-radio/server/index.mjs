@@ -492,6 +492,13 @@ app.get('/api/playlist/tracks', async function(req, res) {
   }
 });
 
+// Serve built frontend (Electron / production) — must be before the 404 catch-all.
+const FRONTEND_DIST = process.env.FRONTEND_DIST || '';
+if (FRONTEND_DIST && existsSync(join(FRONTEND_DIST, 'index.html'))) {
+  app.use(express.static(FRONTEND_DIST));
+  console.log('[static] serving frontend from ' + FRONTEND_DIST);
+}
+
 app.use(function(req, res) {
   res.status(404).json({ error: 'not found' });
 });
