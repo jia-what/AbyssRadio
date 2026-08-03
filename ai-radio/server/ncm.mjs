@@ -253,14 +253,21 @@ async function getUrlRaw(songId, source, cookieOverride) {
   return await meting.url(id);
 }
 
-export async function getLyric(songId, source, kugouCookie) {
+export async function getLyric(songId, source, kugouCookie, searchKeyword) {
   if (!source) source = 'netease';
   var id = String(songId);
+  var kugou = null;
   if (source === 'kugou') {
     const { getKugouLyric } = await import('./kugou.mjs');
-    const direct = await getKugouLyric(id, kugouCookie);
-    if (direct) return direct;
-    id = id.split('|')[0];
+    kugou = await getKugouLyric(id, kugouCookie);
+    // Keep hash part only for fallback; remember keyword for Netease translation lookup
+    const parts = id.split('|');
+    id = parts[0];
+    searchKeyword = searchKeyword || decodeURIComponent(parts[1] || '');
+    if (kugou.lrc) {
+      const tlyric = await neteaseTranslationFallback(searchKeyword, kugou.tlyric);
+      return { lrc: kugou.lrc, krc: kugou.krc || '', tlyric };
+    }
   }
   var meting = makeMeting(source);
   if (kugouCookie && source === 'kugou') meting.cookie(kugouCookie);
@@ -269,8 +276,77 @@ export async function getLyric(songId, source, kugouCookie) {
   try {
     var parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     var lrc = parsed.lrc || parsed;
-    return lrc.lyric || '';
+    var tlyric = (parsed.tlyric && parsed.tlyric.lyric) || '';
+    // Defect 8: Netease-source songs with no translation — try a same-name
+    // borrow too (a different release/version may carry tlyric).
+    if (source === 'netease' && !tlyric && searchKeyword) {
+      tlyric = await neteaseTranslationFallback(searchKeyword, '');
+    }
+    return { lrc: lrc.lyric || '', krc: '', tlyric };
   } catch {
+    return { lrc: '', krc: '', tlyric: '' };
+  }
+}
+
+/** Netease translation fallback (Mineradio-style): when the source platform has
+ *  no translation, search the same song on Netease and borrow its tlyric.
+ *  keyword format: "artist<TAB>title" (frontend) or legacy "artist title".
+ *  Bounded: only caches a miss AFTER trying every candidate (defect 8). */
+const neteaseTransCache = new Map();   // keyword -> { tlyric, at }
+const neteaseTransMiss = new Map();   // keyword -> at
+async function neteaseTranslationFallback(keyword, existing) {
+  if (existing && existing.trim()) return existing;
+  const kw = String(keyword || '').trim();
+  if (!kw) return '';
+  const now = Date.now();
+  if (neteaseTransCache.has(kw)) return neteaseTransCache.get(kw).tlyric;
+  if (neteaseTransMiss.has(kw) && now - neteaseTransMiss.get(kw) < 10 * 60 * 1000) return '';
+  try {
+    // Split "artist\t title" (or legacy "artist title"): search with the full
+    // string, match against the title part with whole-word semantics.
+    const tabIdx = kw.indexOf('\t');
+    let titleNeedle, artistNeedle;
+    if (tabIdx >= 0) {
+      artistNeedle = kw.slice(0, tabIdx).trim();
+      titleNeedle = kw.slice(tabIdx + 1).trim();
+    } else {
+      const parts = kw.split(/\s+/);
+      // Heuristic for legacy form: last 1..2 tokens are likely the title
+      artistNeedle = parts.slice(0, -1).join(' ');
+      titleNeedle = parts[parts.length - 1] || '';
+    }
+    const norm = (s) => String(s || '').toLowerCase().replace(/[\s（）()\[\]【】\-—_·.。,!！?？:：'"“”‘’]/g, '');
+    const needleT = norm(titleNeedle);
+    if (!needleT || needleT.length < 2) return '';
+    const needleA = norm(artistNeedle);
+
+    const items = await searchNetease(`${titleNeedle} ${artistNeedle}`.trim(), 8);
+    for (const it of items) {
+      const t = norm(it.title);
+      const a = norm(it.artist);
+      // Whole-title match: exact after normalization, or contiguous containment
+      // of at least 4 chars (CJK) / 4 latin chars — never 2-char fuzzy includes.
+      let titleHit = t === needleT;
+      if (!titleHit && needleT.length >= 4) {
+        titleHit = t.includes(needleT) || needleT.includes(t);
+      }
+      if (!titleHit) continue;
+      // Artist bonus: prefer the original artist but don't hard-fail on it —
+      // many Netease entries tag "artist - 歌手" strings.
+      const artistScore = !needleA || a.includes(needleA) || needleA.includes(a) ? 1 : 0;
+      const raw = await makeMeting('netease').lyric(it.id);
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const tl = (parsed?.tlyric?.lyric) || '';
+      if (tl && tl.trim()) {
+        neteaseTransCache.set(kw, { tlyric: tl, at: now });
+        return tl;
+      }
+      // No translation on this candidate — try the next (defect 8: no early break)
+    }
+    neteaseTransMiss.set(kw, now);
+    return '';
+  } catch {
+    neteaseTransMiss.set(kw, now);
     return '';
   }
 }

@@ -2,6 +2,7 @@
  * KuGou account binding + user playlist APIs.
  */
 import { parseCookie } from './session.mjs';
+import { inflateSync } from 'zlib';
 import {
   kugouAndroidRequest, kugouH5Request, kugouIdentity, decodeKugouNickName, signKey, poolToCookieString, randomDfid,
   md5, signatureAndroidParams, signatureWebParams, KUGOU_SRCAPPID,
@@ -759,10 +760,12 @@ async function fetchKugouWebPlayUrl(ctx) {
   return null;
 }
 
-/** Fetch KuGou LRC by hash (playlist ids are hash|album_audio_id). */
+/** Fetch KuGou lyrics by hash — returns { lrc, krc, tlyric } (all '' when missing).
+ *  lrc = line-level LRC text, krc = decoded KRC text (word-level karaoke),
+ *  tlyric = translation (filled by caller via Netease fallback). */
 export async function getKugouLyric(songId, cookie) {
   const hash = String(songId).split('|')[0].toLowerCase();
-  if (!/^[a-f0-9]{32}$/.test(hash)) return '';
+  if (!/^[a-f0-9]{32}$/.test(hash)) return { lrc: '', krc: '', tlyric: '' };
 
   const headers = { 'User-Agent': 'IPhone-8990-searchSong' };
   if (cookie) {
@@ -774,6 +777,7 @@ export async function getKugouLyric(songId, cookie) {
     }
   }
 
+  const out = { lrc: '', krc: '', tlyric: '' };
   try {
     const searchQs = new URLSearchParams({
       keyword: ' - ',
@@ -785,20 +789,56 @@ export async function getKugouLyric(songId, cookie) {
     const searchRes = await fetch(`http://krcs.kugou.com/search?${searchQs.toString()}`, { headers });
     const searchJson = await searchRes.json();
     const candidate = searchJson?.candidates?.[0];
-    if (!candidate?.id || !candidate?.accesskey) return '';
+    if (!candidate?.id || !candidate?.accesskey) return out;
 
-    const dlQs = new URLSearchParams({
-      charset: 'utf8',
-      accesskey: candidate.accesskey,
-      id: String(candidate.id),
-      client: 'mobi',
-      fmt: 'lrc',
-      ver: '1',
-    });
-    const dlRes = await fetch(`http://lyrics.kugou.com/download?${dlQs.toString()}`, { headers });
-    const dlJson = await dlRes.json();
-    if (!dlJson?.content) return '';
-    return Buffer.from(dlJson.content, 'base64').toString('utf8');
+    // Fetch line-level LRC + word-level KRC in parallel
+    const fmts = [
+      { fmt: 'lrc', key: 'lrc' },
+      { fmt: 'krc', key: 'krc' },
+    ];
+    const results = await Promise.all(fmts.map(async ({ fmt, key }) => {
+      try {
+        const dlQs = new URLSearchParams({
+          charset: 'utf8',
+          accesskey: candidate.accesskey,
+          id: String(candidate.id),
+          client: 'pc',
+          fmt,
+          ver: '1',
+        });
+        const dlRes = await fetch(`http://krcs.kugou.com/download?${dlQs.toString()}`, { headers });
+        const dlJson = await dlRes.json();
+        if (!dlJson?.content) return { key, text: '' };
+        if (fmt === 'krc') {
+          return { key, text: decodeKrc(dlJson.content) };
+        }
+        return { key, text: Buffer.from(dlJson.content, 'base64').toString('utf8').replace(/^\uFEFF/, '') };
+      } catch {
+        return { key, text: '' };
+      }
+    }));
+    for (const { key, text } of results) {
+      if (text) out[key] = text;
+    }
+    return out;
+  } catch {
+    return out;
+  }
+}
+
+/** KRC decryption — public format algorithm (XOR key is a well-known constant
+ *  shared by Kugou's own player and every open-source KRC parser; NOT a secret). */
+const KRC_KEY = Buffer.from([64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105]);
+
+function decodeKrc(base64Content) {
+  try {
+    const raw = Buffer.from(base64Content, 'base64');
+    // First 4 bytes are the 'krc18' magic; XOR from offset 4 with the key cycling
+    const body = Buffer.alloc(Math.max(0, raw.length - 4));
+    for (let i = 4; i < raw.length; i++) {
+      body[i - 4] = raw[i] ^ KRC_KEY[(i - 4) % KRC_KEY.length];
+    }
+    return inflateSync(body).toString('utf8');
   } catch {
     return '';
   }

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
-import { parseLRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
+import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 
 const DEFAULT_PLAYLIST: Track[] = [
   { id: '1', title: 'Neon Dusk', artist: 'Abyss Collective', cover: '#1a0a2e-#16213e', duration: 187 },
@@ -59,6 +59,8 @@ export function useRadioState() {
 
   const [trackSources, setTrackSources] = useState<Record<string, string>>({});
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+  const [translationLines, setTranslationLines] = useState<LyricLine[]>([]);
+  const [lyricMode, setLyricMode] = useState<'off' | 'original' | 'dual'>('dual');
   const [realDuration, setRealDuration] = useState(0); // actual audio duration from <audio>
   const [isSimulatedPlayback, setIsSimulatedPlayback] = useState(false);
 
@@ -256,11 +258,11 @@ export function useRadioState() {
     const gen = ++loadGenRef.current;
     resumePulseCtx();
     try {
-      const [url, lrcRaw] = await Promise.all([
+      const [url, lrcPayload] = await Promise.all([
         // Always request the highest available quality — server falls back down
         // the chain (hires → lossless → exhigh → standard) per track's rights.
         getMusicUrl(trackId, source, trackName, sessionKeyRef.current, 'hires'),
-        getMusicLyric(trackId, source, sessionKeyRef.current),
+        getMusicLyric(trackId, source, trackName, sessionKeyRef.current),
       ]);
 
       if (gen !== loadGenRef.current) return;
@@ -269,8 +271,10 @@ export function useRadioState() {
       const idx = trackIndexRef.current;
       if (tracks[idx]?.id !== trackId) return;
 
-      const parsed = parseLRC(lrcRaw);
-      setLyricLines(parsed);
+      const parsed = parseLRC(lrcPayload.lyric);
+      const parsedKrc = parseKRC(lrcPayload.krc);
+      setLyricLines(parsedKrc.length > 0 ? parsedKrc : parsed);
+      setTranslationLines(parseLRC(lrcPayload.tlyric));
 
       const audio = audioRef.current;
       if (url && audio) {
@@ -322,7 +326,7 @@ export function useRadioState() {
       if (isPlayingRef.current) {
         stopSimulatedPlayback();
       } else {
-        loadAndPlayTrack(track.id, src, `${track.title} ${track.artist}`);
+        loadAndPlayTrack(track.id, src, `${track.artist}\t${track.title}`);
       }
       return;
     }
@@ -349,7 +353,7 @@ export function useRadioState() {
     if (nextTrack && trackSourcesRef.current[nextTrack.id]) {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
-      loadAndPlayTrack(nextTrack.id, trackSourcesRef.current[nextTrack.id], `${nextTrack.title} ${nextTrack.artist}`);
+      loadAndPlayTrack(nextTrack.id, trackSourcesRef.current[nextTrack.id], `${nextTrack.artist}\t${nextTrack.title}`);
     } else {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
@@ -375,7 +379,7 @@ export function useRadioState() {
     if (prevTrack && trackSourcesRef.current[prevTrack.id]) {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
-      loadAndPlayTrack(prevTrack.id, trackSourcesRef.current[prevTrack.id], `${prevTrack.title} ${prevTrack.artist}`);
+      loadAndPlayTrack(prevTrack.id, trackSourcesRef.current[prevTrack.id], `${prevTrack.artist}\t${prevTrack.title}`);
     } else {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
@@ -429,6 +433,7 @@ export function useRadioState() {
       setTrackSources(sources);
       setPlaylist(tracks);
       setLyricLines([]);
+      setTranslationLines([]);
       setRealDuration(0);
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
@@ -443,7 +448,7 @@ export function useRadioState() {
       trackIndexRef.current = randomIndex;
       setCurrentTrackIndex(randomIndex);
       const chosen = results[randomIndex];
-      loadAndPlayTrack(chosen.id, chosen.source || 'netease', chosen.title + ' ' + (chosen.artist || ''));
+      loadAndPlayTrack(chosen.id, chosen.source || 'netease', (chosen.artist || '') + '\t' + chosen.title);
       return tracks[randomIndex];
     } catch { return null; }
   }, [loadAndPlayTrack]);
@@ -474,6 +479,7 @@ export function useRadioState() {
     setPlaylist(queue);
     setTrackSources(sources);
     setLyricLines([]);
+    setTranslationLines([]);
     setRealDuration(0);
     trackIndexRef.current = idx;
     setCurrentTrackIndex(idx);
@@ -481,7 +487,7 @@ export function useRadioState() {
     setProgress(0);
 
     const chosen = tracks[idx];
-    loadAndPlayTrack(chosen.id, chosen.source || 'netease', `${chosen.title} ${chosen.artist}`);
+    loadAndPlayTrack(chosen.id, chosen.source || 'netease', `${chosen.artist}\t${chosen.title}`);
   }, [loadAndPlayTrack]);
 
   const requestSong = useCallback((query: string) => {
@@ -500,7 +506,7 @@ export function useRadioState() {
     if (track && trackSources[track.id]) {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
-      loadAndPlayTrack(track.id, trackSources[track.id]);
+      loadAndPlayTrack(track.id, trackSources[track.id], `${track.artist}\t${track.title}`);
     } else {
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
@@ -542,6 +548,7 @@ export function useRadioState() {
     isPlaying, messages, isPortaling,
     currentTrack, playlist, progress, currentTime, duration, volume, isMuted,
     trackLyrics, lyricIndex, lyricLines, realDuration: displayDuration,
+    translationLines, lyricMode, setLyricMode,
     isDemoPlayback: isSimulatedPlayback && isPlaying,
     audioRef,
     pulseAnalyserRef,

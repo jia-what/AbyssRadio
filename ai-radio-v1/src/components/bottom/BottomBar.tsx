@@ -23,12 +23,20 @@ interface Props {
   onToggleMute: () => void;
   onPin: () => void;
   onUnpin: () => void;
+  lyricMode: 'off' | 'original' | 'dual';
+  onLyricModeChange: (m: 'off' | 'original' | 'dual') => void;
 }
+
+const LYRIC_MODE_LABEL: Record<'off' | 'original' | 'dual', string> = {
+  off: '歌词关',
+  original: '仅原词',
+  dual: '原词+译',
+};
 
 export default function BottomBar({
   visible, track, isPlaying, progress, duration, realDuration, currentTime,
   volume, isMuted, onTogglePlay, onNext, onPrev, onSeek, onVolumeChange, onToggleMute,
-  onPin, onUnpin,
+  onPin, onUnpin, lyricMode, onLyricModeChange,
 }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [localProgress, setLocalProgress] = useState(progress);
@@ -249,6 +257,19 @@ export default function BottomBar({
                 {' / '}
                 {formatTime(displayDur)}
               </span>
+              {/* Lyric mode toggle — inline control in the bar (defect 7) */}
+              <button
+                type="button"
+                onClick={() => {
+                  const order: ('off' | 'original' | 'dual')[] = ['dual', 'original', 'off'];
+                  const next = order[(order.indexOf(lyricMode) + 1) % order.length];
+                  onLyricModeChange(next);
+                }}
+                className="text-[10px] px-2 py-1 rounded-full border border-white/10 text-white/30 hover:text-white/70 hover:border-white/25 transition-colors duration-300 shrink-0"
+                title="歌词显示模式"
+              >
+                {LYRIC_MODE_LABEL[lyricMode]}
+              </button>
               <div
                 className="flex items-center gap-2"
                 onMouseEnter={() => setVolHover(true)}

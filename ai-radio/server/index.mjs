@@ -202,14 +202,17 @@ app.get('/api/music/lyric', async function(req, res) {
   const id = req.query.id || '';
   const source = req.query.source || 'netease';
   const key = req.query.key || '';
+  const keyword = req.query.keyword || '';
   if (!id) return res.status(400).json({ error: 'missing query param id' });
   try {
     const session = key ? getSession(key) : null;
     const kugouCookie = session && session.platform === 'kugou'
       ? session.cookie
       : (process.env.KUGOU_COOKIE || undefined);
-    const lyric = await getLyric(id, source, kugouCookie);
-    res.json({ lyric: lyric || '' });
+    // keyword = "artist\t title" (defect 8) — used for Netease translation borrow
+    const lyric = await getLyric(id, source, kugouCookie, keyword);
+    if (typeof lyric === 'string') res.json({ lyric, krc: '', tlyric: '' });
+    else res.json({ lyric: lyric.lrc || '', krc: lyric.krc || '', tlyric: lyric.tlyric || '' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

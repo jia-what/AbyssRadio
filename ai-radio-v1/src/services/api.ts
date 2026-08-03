@@ -46,7 +46,13 @@ export async function getMusicUrl(
   const sources = source === 'kugou' ? 'kugou,netease' : 'netease,kugou';
   let apiUrl = `/api/music/url-smart?id=${encodeURIComponent(id)}&sources=${encodeURIComponent(sources)}`;
   // Playlist-precision ids (hash|album_audio_id): never pass keyword — avoids wrong-song search fallback
-  if (keyword && !String(id).includes('|')) apiUrl += `&q=${encodeURIComponent(keyword)}`;
+  // keyword arrives as "artist\t title" — for search fallback, normalize to "title artist" (defect 8)
+  if (keyword && !String(id).includes('|')) {
+    const searchKw = String(keyword).includes('\t')
+      ? String(keyword).split('\t').reverse().join(' ')
+      : String(keyword);
+    apiUrl += `&q=${encodeURIComponent(searchKw)}`;
+  }
   if (sessionKey) apiUrl += `&key=${encodeURIComponent(sessionKey)}`;
   if (quality) apiUrl += `&quality=${encodeURIComponent(quality)}`;
   const res = await fetch(apiUrl);
@@ -61,17 +67,36 @@ export async function getMusicUrl(
 }
 
 /**
- * Get lyrics for a song.
+ * Get lyrics for a song — returns line-level LRC plus word-level KRC (karaoke)
+ * and a Netease-borrowed translation line when the source has none.
  */
+export interface LyricPayload {
+  lyric: string;
+  krc: string;
+  tlyric: string;
+}
+
 export async function getMusicLyric(
   id: string,
   source: string,
+  trackName?: string,
   sessionKey?: string
-): Promise<string> {
+): Promise<LyricPayload> {
+  // Keyword travels as "artist<TAB>title" so the backend can borrow a Netease
+  // translation with reliable artist/title splitting (defect 8).
   let url = `/api/music/lyric?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`;
+  if (trackName) url += `&keyword=${encodeURIComponent(trackName)}`;
   if (sessionKey) url += `&key=${encodeURIComponent(sessionKey)}`;
-  const res = await fetch(url);
-  if (!res.ok) return '';
-  const data = await res.json();
-  return data.lyric ?? '';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { lyric: '', krc: '', tlyric: '' };
+    const data = await res.json();
+    return {
+      lyric: data.lyric ?? '',
+      krc: data.krc ?? '',
+      tlyric: data.tlyric ?? '',
+    };
+  } catch {
+    return { lyric: '', krc: '', tlyric: '' };
+  }
 }

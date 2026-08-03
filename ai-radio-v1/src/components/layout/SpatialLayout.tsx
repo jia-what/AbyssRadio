@@ -26,6 +26,9 @@ interface Props {
   trackLyrics: string[];
   lyricIndex: number;
   lyricLines: LyricLine[];
+  translationLines: LyricLine[];
+  lyricMode: 'off' | 'original' | 'dual';
+  onLyricModeChange: (m: 'off' | 'original' | 'dual') => void;
   messages: AIMessage[];
   orbit: OrbitRotation;
   cameraRef: RefObject<ParticleCameraState>;
@@ -108,6 +111,9 @@ export default function SpatialLayout(p: Props) {
           trackLyrics={p.trackLyrics}
           lyricIndex={p.lyricIndex}
           lyricLines={p.lyricLines}
+          translationLines={p.translationLines}
+          lyricMode={p.lyricMode}
+          onLyricModeChange={p.onLyricModeChange}
           currentTime={p.currentTime}
           realDuration={p.realDuration}
           duration={p.duration}
@@ -150,6 +156,8 @@ export default function SpatialLayout(p: Props) {
           onToggleMute={p.onToggleMute}
           onPin={() => pin('bottom')}
           onUnpin={() => unpin('bottom')}
+          lyricMode={p.lyricMode}
+          onLyricModeChange={p.onLyricModeChange}
         />
       </motion.div>
 
