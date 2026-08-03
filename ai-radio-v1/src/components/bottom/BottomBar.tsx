@@ -1,9 +1,18 @@
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, AudioLines, Disc3 } from 'lucide-react';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Track } from '../../types';
 import { formatTime } from '../../utils/formatTime';
 import { coverUrl, isImageUrl } from '../../utils/img';
+
+export type QualityTier = 'standard' | 'exhigh' | 'lossless' | 'hires';
+
+const QUALITY_LABEL: Record<QualityTier, string> = {
+  standard: '标准',
+  exhigh: '极高',
+  lossless: '无损',
+  hires: 'Hi-Res',
+};
 
 interface Props {
   visible: boolean;
@@ -23,18 +32,21 @@ interface Props {
   onToggleMute: () => void;
   onPin: () => void;
   onUnpin: () => void;
+  quality: QualityTier;
+  onQualityChange: (q: QualityTier) => void;
 }
 
 export default function BottomBar({
   visible, track, isPlaying, progress, duration, realDuration, currentTime,
   volume, isMuted, onTogglePlay, onNext, onPrev, onSeek, onVolumeChange, onToggleMute,
-  onPin, onUnpin,
+  onPin, onUnpin, quality, onQualityChange,
 }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [localProgress, setLocalProgress] = useState(progress);
   const [volHover, setVolHover] = useState(false);
   const [isVolDragging, setIsVolDragging] = useState(false);
   const [snapProgress, setSnapProgress] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeBarRef = useRef<HTMLDivElement>(null);
   const trackIdRef = useRef(track?.id);
@@ -249,6 +261,51 @@ export default function BottomBar({
                 {' / '}
                 {formatTime(displayDur)}
               </span>
+              {/* Quality switcher */}
+              <div className="relative flex items-center">
+                <button
+                  type="button"
+                  onClick={() => setQualityOpen((v) => !v)}
+                  className="flex items-center gap-1.5 text-white/25 hover:text-white/60 transition-colors duration-500 shrink-0 px-1 py-0.5 rounded-md hover:bg-white/[0.05]"
+                  aria-label="音质"
+                  title="音质"
+                >
+                  {quality === 'standard'
+                    ? <Disc3 size={14} />
+                    : <AudioLines size={14} className={quality === 'lossless' || quality === 'hires' ? 'text-cyan-300/80' : ''} />}
+                  <span className="text-[10px] tracking-wide">{QUALITY_LABEL[quality]}</span>
+                </button>
+                <AnimatePresence>
+                  {qualityOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute bottom-8 right-0 z-50 liquid-glass rounded-xl p-1.5 min-w-[110px]"
+                      style={{ backdropFilter: 'blur(16px)', background: 'rgba(10,14,24,0.82)' }}
+                      onMouseLeave={() => setQualityOpen(false)}
+                    >
+                      {(Object.keys(QUALITY_LABEL) as QualityTier[]).map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          onClick={() => { onQualityChange(tier); setQualityOpen(false); }}
+                          className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded-lg transition-colors duration-200 ${
+                            tier === quality
+                              ? 'text-cyan-300/90 bg-white/[0.07]'
+                              : 'text-white/45 hover:text-white/80 hover:bg-white/[0.05]'
+                          }`}
+                        >
+                          {QUALITY_LABEL[tier]}
+                          {tier === 'lossless' && <span className="ml-1 text-[9px] text-cyan-400/60">FLAC</span>}
+                          {tier === 'hires' && <span className="ml-1 text-[9px] text-purple-400/60">96kHz</span>}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
               <div
                 className="flex items-center gap-2"
                 onMouseEnter={() => setVolHover(true)}

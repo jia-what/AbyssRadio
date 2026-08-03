@@ -33,12 +33,14 @@ export async function searchMusic(
  * Get a playable URL for a song, with smart fallback across sources.
  * Tries Netease first, falls back to KuGou/Kuwo if it's a VIP trial.
  * @param keyword - search keyword for cross-source lookup
+ * @param quality - KuGou quality tier: standard|exhigh|lossless|hires (default standard)
  */
 export async function getMusicUrl(
   id: string,
   source: string,
   keyword?: string,
-  sessionKey?: string
+  sessionKey?: string,
+  quality?: string
 ): Promise<string | null> {
   // Only netease + kugou — kuwo Meting returns error JSON strings, not stream URLs
   const sources = source === 'kugou' ? 'kugou,netease' : 'netease,kugou';
@@ -46,6 +48,7 @@ export async function getMusicUrl(
   // Playlist-precision ids (hash|album_audio_id): never pass keyword — avoids wrong-song search fallback
   if (keyword && !String(id).includes('|')) apiUrl += `&q=${encodeURIComponent(keyword)}`;
   if (sessionKey) apiUrl += `&key=${encodeURIComponent(sessionKey)}`;
+  if (quality) apiUrl += `&quality=${encodeURIComponent(quality)}`;
   const res = await fetch(apiUrl);
   if (!res.ok) return null;
   const data = await res.json();
