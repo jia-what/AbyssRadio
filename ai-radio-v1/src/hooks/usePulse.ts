@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { createBeatEngine } from '../utils/beatEngine';
 import { createBeatVisualMapper } from '../utils/beatVisual';
+import { analyzeBeatMap, getCachedBeatMap, type BeatMap } from '../utils/beatMap';
 
 export interface PulseBands {
   bass: number;
@@ -87,6 +88,11 @@ export function usePulseAnalysis(
   const beatPulseRef = useRef(0);
   const beatEngineRef = useRef(createBeatEngine());
   const visualMapperRef = useRef(createBeatVisualMapper());
+  // ——— Offline BeatMap (Mineradio-style precise kicks) ———
+  const beatMapRef = useRef<BeatMap | null>(null);
+  const beatMapCursorRef = useRef(0);      // next kick index to fire
+  const beatMapTokenRef = useRef(0);       // cancel stale analyses
+  const beatMapReadyRef = useRef(false);   // analysis done for current src
   const rafRef = useRef(0);
   const freqRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const timeRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
@@ -141,6 +147,28 @@ export function usePulseAnalysis(
         beatPulseRef.current = 0;
         beatEngineRef.current.reset(audio?.currentTime ?? 0);
         visualMapperRef.current.reset();
+        // ——— Start offline BeatMap analysis for the new track ———
+        const token = ++beatMapTokenRef.current;
+        beatMapReadyRef.current = false;
+        const cached = getCachedBeatMap(src);
+        if (cached) {
+          beatMapRef.current = cached;
+          beatMapCursorRef.current = 0;
+          beatMapReadyRef.current = true;
+        } else {
+          beatMapRef.current = null;
+          beatMapCursorRef.current = 0;
+          analyzeBeatMap(src, src).then((map) => {
+            if (token !== beatMapTokenRef.current) return;
+            if (map && map.kicks.length > 4) {
+              beatMapRef.current = map;
+              beatMapCursorRef.current = 0;
+              beatMapReadyRef.current = true;
+            } else {
+              beatMapReadyRef.current = true; // analyzed but unusable → stay live
+            }
+          });
+        }
       }
 
       const freq = freqRef.current;
@@ -210,7 +238,34 @@ export function usePulseAnalysis(
         let beatOnset = false;
         const mapper = visualMapperRef.current;
 
-        if (realtimeBeat.hit) {
+        // ——— BeatMap cursor: fire precise kicks when the offline map is ready ———
+        if (beatMapReadyRef.current && beatMapRef.current) {
+          const map = beatMapRef.current;
+          const t = audioTime;
+          // Jump cursor forward to current playback position (seek support)
+          while (
+            beatMapCursorRef.current < map.kicks.length
+            && map.kicks[beatMapCursorRef.current].time < t - 0.20
+          ) {
+            beatMapCursorRef.current++;
+          }
+          // Fire any kicks inside this frame's window
+          let fired = 0;
+          while (
+            beatMapCursorRef.current < map.kicks.length
+            && map.kicks[beatMapCursorRef.current].time <= t + 0.02
+          ) {
+            const k = map.kicks[beatMapCursorRef.current];
+            beatMapCursorRef.current++;
+            const p = 0.34 + k.strength * 0.48;
+            if (p > beatPulse + 0.05) {
+              beatPulse = Math.max(beatPulse, p);
+              beatOnset = true;
+            }
+            fired++;
+          }
+          void fired;
+        } else if (realtimeBeat.hit) {
           const rtPulse = mapper.mapHit(realtimeBeat.strength, dt);
           if (rtPulse > beatPulse + 0.07) beatOnset = true;
           beatPulse = Math.max(beatPulse, rtPulse);

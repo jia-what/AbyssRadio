@@ -194,8 +194,15 @@ export default function CoverParticleField({
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       gl.viewport(0, 0, canvas.width, canvas.height);
-      perspective(proj, 42, width / height, 0.1, 100);
     };
+
+    // ——— Beat-driven FOV punch (Mineradio-style) ———
+    // Kick contracts the camera lens (fov shrinks → cover visually "jumps" closer),
+    // then eases back. Attack is fast (0.24), release slower (0.12) per Mineradio
+    // cameraPunch damping: targetFov = base - kick * 1.75.
+    const BASE_FOV = 42;
+    const FOV_PUNCH = 1.75;
+    let fovSmooth = BASE_FOV;
 
     let focusKey = '';
     let loadedFocusKey = '';
@@ -295,6 +302,11 @@ export default function CoverParticleField({
       const b = bandsRef.current;
       const kick = pulseRefInternal.current.current.kick;
       resize();
+
+      // FOV punch: fast attack on kick, slow release back to base.
+      const targetFov = BASE_FOV - kick * FOV_PUNCH;
+      fovSmooth += (targetFov - fovSmooth) * (targetFov < fovSmooth ? 0.24 : 0.12);
+      perspective(proj, fovSmooth, width / height, 0.1, 100);
 
       const cam = cameraRefInternal.current.current;
       if (cam) updateViewFromOrbit(view, cam);
