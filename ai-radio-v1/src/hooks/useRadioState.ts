@@ -61,25 +61,6 @@ export function useRadioState() {
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [realDuration, setRealDuration] = useState(0); // actual audio duration from <audio>
   const [isSimulatedPlayback, setIsSimulatedPlayback] = useState(false);
-  const [quality, setQualityState] = useState<'standard' | 'exhigh' | 'lossless' | 'hires'>(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('abyss-quality') : null;
-    return (saved as 'standard' | 'exhigh' | 'lossless' | 'hires') || 'standard';
-  });
-  const qualityRef = useRef(quality);
-
-  // Switch quality: persist + reload current track at the new tier.
-  // (loadAndPlayTrack is defined below; invoked via ref indirection to avoid
-  //  use-before-declaration — quality change is always user-triggered at runtime.)
-  const changeQuality = useCallback((q: 'standard' | 'exhigh' | 'lossless' | 'hires') => {
-    setQualityState(q);
-    qualityRef.current = q;
-    if (typeof localStorage !== 'undefined') localStorage.setItem('abyss-quality', q);
-    const track = playlistRef.current?.[trackIndexRef.current];
-    const src = trackSourcesRef.current?.[track?.id || ''];
-    if (track && isPlayingRef.current && src) {
-      loadAndPlayTrackRef.current(track.id, src, track.title + ' ' + (track.artist || ''));
-    }
-  }, []);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pulseAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -276,7 +257,9 @@ export function useRadioState() {
     resumePulseCtx();
     try {
       const [url, lrcRaw] = await Promise.all([
-        getMusicUrl(trackId, source, trackName, sessionKeyRef.current, qualityRef.current),
+        // Always request the highest available quality — server falls back down
+        // the chain (hires → lossless → exhigh → standard) per track's rights.
+        getMusicUrl(trackId, source, trackName, sessionKeyRef.current, 'hires'),
         getMusicLyric(trackId, source, sessionKeyRef.current),
       ]);
 
@@ -323,10 +306,6 @@ export function useRadioState() {
       startSimulatedPlayback();
     }
   }, [startSimulatedPlayback, clearAudioSrc, resumePulseCtx]);
-
-  // Latest loadAndPlayTrack for quality re-load (defined below; runtime-only use)
-  const loadAndPlayTrackRef = useRef(loadAndPlayTrack);
-  loadAndPlayTrackRef.current = loadAndPlayTrack;
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -569,7 +548,6 @@ export function useRadioState() {
     beatAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
     requestSong, searchAndPlay, playPlaylist,
-    quality, changeQuality,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),
     endPortal: () => setIsPortaling(false),
   };

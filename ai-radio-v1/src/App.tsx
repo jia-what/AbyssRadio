@@ -16,7 +16,6 @@ export default function App() {
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
     trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, beatAnalyserRef, isDemoPlayback,
-    quality, changeQuality,
   } = useRadioState();
 
   const handleSend = async (text: string) => {
@@ -167,8 +166,6 @@ export default function App() {
             onSendMessage={handleSend}
             onPlayPlaylist={playPlaylist}
             onRightFocusChange={setRightFocused}
-            quality={quality}
-            changeQuality={changeQuality}
           />
         </div>
       </PulseProvider>

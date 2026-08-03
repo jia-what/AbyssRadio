@@ -70,6 +70,17 @@ function drawWave(
 
   ctx.clearRect(0, 0, width, height);
 
+  // Gaussian envelope: tallest in the center, tapering to the edges
+  // envelope(i) = exp(-0.5 * ((i - mid) / (sigma * N))^2), sigma ~ 0.28
+  const SIGMA = 0.28;
+  const mid = (pts - 1) / 2;
+  const sigmaN = SIGMA * pts;
+  const envelope: number[] = new Array(pts);
+  for (let i = 0; i < pts; i++) {
+    const d = (i - mid) / sigmaN;
+    envelope[i] = Math.exp(-0.5 * d * d);
+  }
+
   // Only paint the lower band — keeps lyrics / cover clear
   ctx.save();
   ctx.beginPath();
@@ -82,8 +93,10 @@ function drawWave(
     const v = bins[i];
     const ripple = Math.sin(i * 0.11 + phase) * 0.16;
     const h = amp * (v * 0.88 + ripple * v + energy * 0.1);
-    top.push(cy - h);
-    bot.push(cy + h * 0.22);
+    // Apply gaussian window: center peaks, edges near baseline (keep a small floor)
+    const g = 0.08 + 0.92 * envelope[i];
+    top.push(cy - h * g);
+    bot.push(cy + h * 0.22 * g);
   }
 
   const [cr, cg, cb] = colors.core;

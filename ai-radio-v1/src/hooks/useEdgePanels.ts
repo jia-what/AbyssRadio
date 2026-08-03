@@ -4,10 +4,15 @@ export type PanelZone = 'left' | 'right' | 'bottom';
 
 const HIDE_DELAY_MS: Record<PanelZone, number> = {
   left: 1000,
-  right: 0,
+  right: 1000,
   bottom: 1000,
 };
 const BOTTOM_EDGE = 60;
+const LEFT_ZONE_WIDTH = 40;
+/** Height above the bottom bar where right/left edge hover is suppressed —
+ *  the bottom bar's own controls (quality button etc.) must not be covered
+ *  by an edge panel popping open under the cursor. */
+const EDGE_ZONE_SKIP_BOTTOM_PX = 150;
 /** Once open, keep the playlist zone alive across the full panel width (not just the screen edge). */
 export const RIGHT_ZONE_WIDTH = 420;
 
@@ -18,8 +23,8 @@ export interface EdgePanelState {
 }
 
 /**
- * Edge panels: bottom player defaults visible; AI / playlist open via pin/toggle
- * (not auto hover — product convergence: only the play bar is ambient).
+ * Edge panels: bottom player defaults visible; AI / playlist open on edge hover
+ * (left/right zones), pin keeps them open, unpin restores hover behavior.
  */
 export function useEdgePanels() {
   const [panels, setPanels] = useState<EdgePanelState>({ left: false, right: false, bottom: true });
@@ -63,12 +68,8 @@ export function useEdgePanels() {
 
   const unpin = useCallback((zone: PanelZone) => {
     pinned.current[zone] = false;
-    if (zone === 'right') {
-      setVisible('right', false);
-      return;
-    }
     scheduleHide(zone);
-  }, [scheduleHide, setVisible]);
+  }, [scheduleHide]);
 
   const toggle = useCallback((zone: PanelZone) => {
     if (visibleRef.current[zone] && pinned.current[zone]) {
@@ -79,12 +80,28 @@ export function useEdgePanels() {
     pin(zone);
   }, [pin, unpin, setVisible]);
 
-  // Bottom bar: keep ambient via edge hover when unpinned; left/right are button-driven only.
+  // Edge hover: bottom bar on bottom edge; AI on left edge; playlist on right edge.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      const w = window.innerWidth;
       const h = window.innerHeight;
-      if (e.clientY > h - BOTTOM_EDGE) show('bottom');
-      else if (!pinned.current.bottom) scheduleHide('bottom');
+      // Bottom: show on bottom edge hover
+      if (e.clientY > h - BOTTOM_EDGE) {
+        show('bottom');
+      } else if (!pinned.current.bottom) {
+        scheduleHide('bottom');
+      }
+      // Left: AI panel on left edge hover (not when pinned; skip near bottom bar)
+      if (!pinned.current.left) {
+        if (e.clientX <= LEFT_ZONE_WIDTH && e.clientY < h - EDGE_ZONE_SKIP_BOTTOM_PX) show('left');
+        else scheduleHide('left');
+      }
+      // Right: playlist on right edge hover (wider zone; skip near bottom bar so
+      // the bottom bar controls stay clickable — the panel must not pop under the cursor)
+      if (!pinned.current.right) {
+        if (e.clientX >= w - RIGHT_ZONE_WIDTH && e.clientY < h - EDGE_ZONE_SKIP_BOTTOM_PX) show('right');
+        else scheduleHide('right');
+      }
     };
 
     window.addEventListener('mousemove', onMove);

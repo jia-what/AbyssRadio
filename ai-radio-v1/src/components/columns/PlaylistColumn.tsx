@@ -343,7 +343,7 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
             className="playlist-hud fixed right-0 top-0 bottom-0 z-40 flex justify-end items-center pointer-events-auto"
             style={{ width: 'min(420px, 38vw)' }}
             onMouseEnter={onFocus}
-            onMouseLeave={() => { if (view !== 'bind') onBlur(); }}
+            onMouseLeave={onBlur}
           >
             {/* Soft left fade — blends into the universe instead of a hard black edge */}
             <div

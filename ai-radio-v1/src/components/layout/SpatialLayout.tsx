@@ -38,8 +38,6 @@ interface Props {
   onSendMessage: (text: string) => void;
   onPlayPlaylist: (tracks: PlaylistTrack[], startIndex: number, sessionKey: string) => void;
   onRightFocusChange?: (focused: boolean) => void;
-  quality: 'standard' | 'exhigh' | 'lossless' | 'hires';
-  changeQuality: (q: 'standard' | 'exhigh' | 'lossless' | 'hires') => void;
 }
 
 const STAGE_SPRING = { type: 'spring' as const, stiffness: 170, damping: 26, mass: 0.85 };
@@ -117,28 +115,6 @@ export default function SpatialLayout(p: Props) {
         />
       </LyricStage>
 
-      {/* Corner toggles — AI / playlist tucked away until asked */}
-      {!panels.left && (
-        <button
-          type="button"
-          onClick={toggleLeft}
-          className="fixed left-4 bottom-28 z-40 pointer-events-auto text-[10px] tracking-[0.2em] uppercase text-white/25 hover:text-white/55 transition-colors duration-500"
-          aria-label="打开 AI"
-        >
-          AI
-        </button>
-      )}
-      {!panels.right && (
-        <button
-          type="button"
-          onClick={toggleRight}
-          className="fixed right-4 bottom-28 z-40 pointer-events-auto text-[10px] tracking-[0.2em] uppercase text-white/25 hover:text-white/55 transition-colors duration-500"
-          aria-label="打开歌单"
-        >
-          歌单
-        </button>
-      )}
-
       {/* HUD — fixed to viewport; must stay outside orbit parallax (transform clips fixed children). */}
       <SignalColumn
         visible={panels.left}
@@ -174,8 +150,6 @@ export default function SpatialLayout(p: Props) {
           onToggleMute={p.onToggleMute}
           onPin={() => pin('bottom')}
           onUnpin={() => unpin('bottom')}
-          quality={p.quality}
-          onQualityChange={p.changeQuality}
         />
       </motion.div>
 
