@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import SpatialLayout from './components/layout/SpatialLayout';
 import PortalAnimation from './components/portal/PortalAnimation';
 import CoverParticleField from './components/background/CoverParticleField';
@@ -7,6 +7,7 @@ import CoverPulseWave from './components/background/CoverPulseWave';
 import { PulseProvider } from './context/PulseContext';
 import { useRadioState } from './hooks/useRadioState';
 import { useParticleCamera } from './hooks/useParticleCamera';
+import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
 
 export default function App() {
   const [rightFocused, setRightFocused] = useState(false);
@@ -113,6 +114,94 @@ export default function App() {
     }
   };
 
+  // ——— Cover palette → lyric highlight (Mineradio same-source color) ———
+  const [coverPalette, setCoverPalette] = useState<CoverPalette | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const cover = currentTrack?.cover ?? '';
+    if (!cover) { setCoverPalette(null); return; }
+    void loadCoverPalette(cover).then((p) => { if (alive) setCoverPalette(p); });
+    return () => { alive = false; };
+  }, [currentTrack?.cover]);
+
+  // ——— Lyric mesh (cover-plane): title card + lyrics share one world scale ———
+  // DOM LyricLight stays hidden whenever mesh is active (avoids title→lyric shrink).
+  const lyricMesh = useMemo(() => {
+    if (lyricMode === 'off' || !currentTrack) return null;
+    const palette = coverPalette
+      ? (() => {
+          const w = paletteToWaveColors(coverPalette);
+          return { highlight: w.core, glow: w.hi };
+        })()
+      : undefined;
+
+    // Before / between lyric lines: same mesh as lyrics, title + artist
+    const activeLine = lyricIndex >= 0 ? trackLyrics[lyricIndex] : undefined;
+    if (!activeLine) {
+      return {
+        active: currentTrack.title,
+        prev: '',
+        next: '',
+        progress: 0,
+        translation: currentTrack.artist || undefined,
+        hasTranslationData: !!currentTrack.artist,
+        variant: 'title' as const,
+        palette,
+      };
+    }
+
+    const lines = lyricLines.length > 0 ? lyricLines : [];
+    const line = lines[lyricIndex];
+    const lineStart = line?.time ?? 0;
+    const lineEnd = lines[lyricIndex + 1]?.time ?? (realDuration || duration || 1);
+    const words = line?.words;
+    let progress = 0;
+    if (words && words.length > 0) {
+      let filled = 0;
+      let total = 0;
+      for (const w of words) {
+        const wEnd = w.start + w.duration;
+        total += w.text.length;
+        if (currentTime >= wEnd) filled += w.text.length;
+        else if (currentTime > w.start) {
+          const f = (currentTime - w.start) / Math.max(0.05, wEnd - w.start);
+          filled += w.text.length * Math.min(1, Math.max(0, f));
+        }
+      }
+      progress = total > 0 ? filled / total : 0;
+    } else {
+      const rawGap = Math.max(lineEnd - lineStart, 0.1);
+      const cjk = (activeLine.match(/[\u3400-\u9fff\uac00-\ud7a3\u3040-\u30ff]/g) || []).length;
+      const wordsN = (activeLine.replace(/[\u3400-\u9fff\uac00-\ud7a3\u3040-\u30ff]/g, ' ').trim().match(/\S+/g) || []).length;
+      const estSing = cjk * 0.3 + wordsN * 0.34 + 0.6;
+      progress = Math.min(1, Math.max(0, (currentTime - lineStart) / Math.min(rawGap, Math.max(estSing, 0.6))));
+    }
+
+    let translation: string | undefined;
+    const hasTranslationData = translationLines.length > 0;
+    if (lyricMode === 'dual') {
+      const t0 = lines[lyricIndex]?.time ?? 0;
+      let best = '';
+      let bestDist = Infinity;
+      for (const tl of translationLines) {
+        const d = Math.abs(tl.time - t0);
+        if (d < bestDist) { bestDist = d; best = tl.text; }
+      }
+      if (bestDist < 1.5) translation = best;
+    }
+
+    return {
+      active: activeLine,
+      prev: '',
+      next: '',
+      progress,
+      translation,
+      hasTranslationData,
+      variant: 'lyrics' as const,
+      palette,
+    };
+  }, [lyricMode, lyricIndex, trackLyrics, lyricLines, translationLines, currentTime, realDuration, duration, coverPalette, currentTrack]);
+
   return (
     <div className="relative w-full h-screen bg-[#050508] overflow-hidden font-sans">
       <PulseProvider
@@ -133,7 +222,7 @@ export default function App() {
           isPlaying={isPlaying}
           isDemoPlayback={isDemoPlayback}
         />
-        <CoverParticleField cameraRef={cameraRef} />
+        <CoverParticleField cameraRef={cameraRef} lyricMesh={lyricMesh} />
         {isPortaling && <PortalAnimation onComplete={endPortal} />}
 
         <div
@@ -160,6 +249,7 @@ export default function App() {
             translationLines={translationLines}
             lyricMode={lyricMode}
             onLyricModeChange={setLyricMode}
+            lyricMeshActive={!!lyricMesh}
             messages={messages}
             onTogglePlay={togglePlay}
             onNext={playNext}

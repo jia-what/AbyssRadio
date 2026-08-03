@@ -11,7 +11,28 @@ import {
 } from './coverParticle/buildEdgeAndDepth';
 import { VERTEX_SHADER, FRAGMENT_SHADER } from './coverParticle/shaders';
 import { createMat4, perspective } from './coverParticle/mat4';
-import { updateViewFromOrbit, type ParticleCameraState } from './coverParticle/camera';
+import { orbitEye, updateViewFromOrbit, type ParticleCameraState } from './coverParticle/camera';
+import {
+  createLyricCanvas, uploadLyricTexture, drawLyricCanvas,
+  createLyricQuadGeometry, LYRIC_VERTEX_SHADER, LYRIC_FRAGMENT_SHADER,
+  buildLyricCoverModelMatrix, LYRIC_COVER_ANCHOR, LYRIC_PLANE_BASE_W, LYRIC_GROUP_SCALE,
+  LYRIC_CANVAS_H_SINGLE, lyricPlaneWorldSize, sampleLyricMotion,
+  type LyricRowData, type LyricMeshResources,
+} from './coverParticle/lyricQuad';
+
+export interface LyricMeshInput {
+  active: string;
+  prev: string;
+  next: string;
+  /** karaoke progress of the active line (0..1) */
+  progress: number;
+  translation?: string;
+  hasTranslationData?: boolean;
+  /** title card vs scrolling lyrics — same world scale either way */
+  variant?: 'title' | 'lyrics';
+  /** cover-derived palette: highlight + glow RGB (Mineradio same-source color) */
+  palette?: { highlight: [number, number, number]; glow: [number, number, number] };
+}
 
 const MIX_DURATION_MS = 1400;
 
@@ -105,8 +126,10 @@ function loadCoverImage(url: string): Promise<HTMLImageElement> {
  */
 export default function CoverParticleField({
   cameraRef,
+  lyricMesh,
 }: {
   cameraRef: RefObject<ParticleCameraState>;
+  lyricMesh?: LyricMeshInput | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bands = usePulseBands();
@@ -116,10 +139,12 @@ export default function CoverParticleField({
   const pulseRefInternal = useRef(pulseRef);
   const focusRef = useRef(focus);
   const cameraRefInternal = useRef(cameraRef);
+  const lyricMeshRef = useRef<LyricMeshInput | null>(lyricMesh ?? null);
   bandsRef.current = bands;
   pulseRefInternal.current = pulseRef;
   focusRef.current = focus;
   cameraRefInternal.current = cameraRef;
+  lyricMeshRef.current = lyricMesh ?? null;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -135,6 +160,40 @@ export default function CoverParticleField({
     const geo = buildCoverParticleGeometry();
     const program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
     gl.useProgram(program);
+
+    // ——— Lyric quad on cover plane (Mineradio: share cover world pose) ———
+    const lyricCanvas = createLyricCanvas();
+    const basePlane = lyricPlaneWorldSize(lyricCanvas.canvas.width, LYRIC_CANVAS_H_SINGLE);
+    const lyricRes: LyricMeshResources = {
+      canvas: lyricCanvas.canvas,
+      ctx: lyricCanvas.ctx,
+      texture: uploadLyricTexture(gl, lyricCanvas.canvas),
+      width: lyricCanvas.canvas.width,
+      height: lyricCanvas.canvas.height,
+      planeWorldW: basePlane.w,
+      planeWorldH: basePlane.h,
+      lastDrawnProgress: -1,
+      lastDrawnKey: '',
+      dirty: false,
+    };
+    const lyricProgram = createProgram(gl, LYRIC_VERTEX_SHADER, LYRIC_FRAGMENT_SHADER);
+    const lyricGeo = createLyricQuadGeometry();
+    const lyricPosBuf = gl.createBuffer();
+    const lyricUvBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, lyricPosBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, lyricGeo.positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lyricUvBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, lyricGeo.uvs, gl.STATIC_DRAW);
+    const lApos = gl.getAttribLocation(lyricProgram, 'aPosition');
+    const lAuv = gl.getAttribLocation(lyricProgram, 'aUv');
+    const lProj = gl.getUniformLocation(lyricProgram, 'uProjection');
+    const lView = gl.getUniformLocation(lyricProgram, 'uView');
+    const lModel = gl.getUniformLocation(lyricProgram, 'uModel');
+    const lTex = gl.getUniformLocation(lyricProgram, 'uTex');
+    const lAlpha = gl.getUniformLocation(lyricProgram, 'uAlpha');
+    const lyricModel = createMat4();
+    // glowFollow: kick sway on cover plane X/Y, then *0.92 recoil
+    const glowFollow = { x: 0, y: 0 };
 
     const posBuf = gl.createBuffer();
     const uvBuf = gl.createBuffer();
@@ -329,7 +388,7 @@ export default function CoverParticleField({
       gl.uniform1f(uIntensity, 0.78);
       gl.uniform1f(uDepth, 0.55);
       gl.uniform1f(uPixel, dpr);
-      gl.uniform1f(uPointScale, 1.48);
+      gl.uniform1f(uPointScale, 1.45);
       gl.uniform1f(uAlpha, 0.94);
 
       gl.activeTexture(gl.TEXTURE0);
@@ -353,6 +412,84 @@ export default function CoverParticleField({
       gl.vertexAttribPointer(aRand, 1, gl.FLOAT, false, 0, 0);
 
       gl.drawArrays(gl.POINTS, 0, geo.count);
+
+      // ——— Lyric on cover plane (same world pose as particles; camera orbits) ———
+      const lyr = lyricMeshRef.current;
+      if (lyr && lyr.active) {
+        const variant = lyr.variant ?? 'lyrics';
+        const key = `${variant}|${lyr.active}|${Math.round(lyr.progress * 50)}|${lyr.translation ?? ''}`;
+        if (lyricRes.lastDrawnKey !== key) {
+          const rows: (LyricRowData | null)[] = [
+            null,
+            { text: lyr.active, progress: lyr.progress, isActive: true, translation: lyr.translation, hasTranslationData: lyr.hasTranslationData },
+            null,
+          ];
+          drawLyricCanvas(lyricRes, rows, 'rgba(255,255,255,0.92)', 'rgba(190,225,255,1)', lyr.palette, variant);
+          gl.bindTexture(gl.TEXTURE_2D, lyricRes.texture);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, lyricRes.canvas);
+          lyricRes.lastDrawnKey = key;
+        }
+
+        const cam = cameraRefInternal.current.current;
+        if (cam) {
+          const eye = orbitEye(cam);
+          const behind = eye[2] < 0;
+          // Mineradio float-profile: dual-sine breathe + Z roll + light Y/Z drift
+          const tSec = (now - start) * 0.001;
+          const motion = sampleLyricMotion(tSec, b.bass, Math.max(kick, b.beat * 0.35));
+          const rollZ = behind ? -motion.rollZ : motion.rollZ;
+          const anchor = {
+            x: LYRIC_COVER_ANCHOR.x,
+            y: LYRIC_COVER_ANCHOR.y + motion.offsetY,
+            z: LYRIC_COVER_ANCHOR.z + motion.offsetZ,
+          };
+          buildLyricCoverModelMatrix(
+            lyricModel,
+            anchor,
+            lyricRes.planeWorldW || (LYRIC_PLANE_BASE_W * LYRIC_GROUP_SCALE),
+            lyricRes.planeWorldH || (LYRIC_PLANE_BASE_W * LYRIC_GROUP_SCALE * 0.2),
+            behind,
+            0,
+            rollZ,
+            motion.scaleMul,
+          );
+
+          if (kick > 0.02) {
+            glowFollow.x += (kick * 0.045 - glowFollow.x) * 0.5;
+            glowFollow.y += (kick * 0.03 - glowFollow.y) * 0.5;
+          } else {
+            glowFollow.x *= 0.92;
+            glowFollow.y *= 0.92;
+          }
+          // Beat kick sway (Mineradio glowFollow on cover-plane axes)
+          lyricModel[12] += glowFollow.x * Math.sign(lyricModel[0] || 1);
+          lyricModel[13] += glowFollow.y;
+
+          gl.useProgram(lyricProgram);
+          gl.uniformMatrix4fv(lProj, false, proj);
+          gl.uniformMatrix4fv(lView, false, view);
+          gl.uniformMatrix4fv(lModel, false, lyricModel);
+          gl.uniform1i(lTex, 0);
+          gl.uniform1f(lAlpha, 1);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, lyricRes.texture);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, lyricPosBuf);
+          gl.enableVertexAttribArray(lApos);
+          gl.vertexAttribPointer(lApos, 3, gl.FLOAT, false, 0, 0);
+          gl.bindBuffer(gl.ARRAY_BUFFER, lyricUvBuf);
+          gl.enableVertexAttribArray(lAuv);
+          gl.vertexAttribPointer(lAuv, 2, gl.FLOAT, false, 0, 0);
+
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.drawArrays(gl.TRIANGLES, 0, lyricGeo.count);
+
+          gl.useProgram(program);
+        }
+      }
+
       raf = requestAnimationFrame(draw);
     };
 
@@ -366,9 +503,13 @@ export default function CoverParticleField({
       gl.deleteBuffer(posBuf);
       gl.deleteBuffer(uvBuf);
       gl.deleteBuffer(randBuf);
+      gl.deleteBuffer(lyricPosBuf);
+      gl.deleteBuffer(lyricUvBuf);
       gl.deleteTexture(coverTex);
       gl.deleteTexture(prevCoverTex);
       gl.deleteTexture(edgeTex);
+      gl.deleteTexture(lyricRes.texture);
+      gl.deleteProgram(lyricProgram);
     };
   }, []);
 

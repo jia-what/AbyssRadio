@@ -53,14 +53,17 @@ export function clearOrbitSpin(spin: OrbitSpin) {
   spin.phi = 0;
 }
 
+/** Mineradio default orbit radius (cover PLANE_SIZE=4.8, FOV~45). */
+export const DEFAULT_ORBIT_RADIUS = 6.6;
+
 export function createParticleCameraState(): ParticleCameraState {
   return {
     theta: 0,
     phi: 0.08,
-    radius: 6.2,
+    radius: DEFAULT_ORBIT_RADIUS,
     baselineTheta: 0,
     baselinePhi: 0.08,
-    baselineRadius: 6.2,
+    baselineRadius: DEFAULT_ORBIT_RADIUS,
     recentering: false,
   };
 }

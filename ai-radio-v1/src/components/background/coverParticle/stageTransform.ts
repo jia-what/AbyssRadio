@@ -7,7 +7,7 @@ export const STAGE_FOV = 42;
 export const LYRIC_ANCHOR = { x: 0, y: 0.06, z: 1.05 };
 
 /** World→CSS scale uses baseline orbit radius so zoom does not pull lyrics into the cover. */
-const WORLD_PX_BASE_RADIUS = 6.2;
+const WORLD_PX_BASE_RADIUS = 6.6;
 
 export interface LyricWorldTransform {
   perspective: number;

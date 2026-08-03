@@ -15,10 +15,12 @@ interface Props {
   realDuration: number;
   duration: number;
   isPlaying: boolean;
+  /** orbit parallax px — per-line depth lag (row-level 3D feel, Mineradio layoutZ) */
+  parallax: { x: number; y: number };
 }
 
 export default function LyricLight({
-  track, trackLyrics, lyricIndex, lyricLines, translationLines, lyricMode, onLyricModeChange,
+  track, trackLyrics, lyricIndex, lyricLines, translationLines, lyricMode,
   currentTime, realDuration, duration, isPlaying,
 }: Props) {
   const displayDur = realDuration || duration || 1;
@@ -119,13 +121,13 @@ export default function LyricLight({
               <motion.div
                 key={idx}
                 initial={{ opacity: 0 }}
-                animate={{ opacity: dist === 0 ? 1 : 0.22 }}
+                animate={{ opacity: dist === 0 ? 1 : 0.28 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                 className={
                   dist === 0
-                    ? 'text-[clamp(22px,4.4vw,46px)] font-bold leading-tight tracking-tight'
-                    : 'text-[clamp(13px,1.9vw,20px)] font-medium text-white/70 leading-snug'
+                    ? 'text-[clamp(18px,3.2vw,36px)] font-bold leading-snug tracking-normal max-w-[90vw] px-4 break-words'
+                    : 'text-[clamp(12px,1.6vw,18px)] font-medium text-white/45 leading-snug max-w-[80vw] px-4 break-words'
                 }
                 style={dist === 0 ? {
                   textShadow: [

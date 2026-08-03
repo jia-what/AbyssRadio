@@ -1,4 +1,5 @@
-export const PLANE_SIZE = 5.2;
+/** World-space cover edge length — paired with DEFAULT_ORBIT_RADIUS for default framing. */
+export const PLANE_SIZE = 4.8;
 export const GRID = 118;
 
 export interface ParticleGeometry {

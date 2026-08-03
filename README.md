@@ -27,5 +27,6 @@ AI_audio/
 
 - 只改 `ai-radio-v1/` 与 `ai-radio/server/`。
 - 续接请读 [`docs/design/AI-RADIO.md`](docs/design/AI-RADIO.md)。
+- 现状快照（含封面/歌词迁移）：[`docs/PROJECT-STATUS-20260803.md`](docs/PROJECT-STATUS-20260803.md)。
 - 圆桌决策单：[`docs/COUNCIL-20260802.md`](docs/COUNCIL-20260802.md)。
 - 清理前备份：`E:\VM\AI_audio_bak_20260802`。

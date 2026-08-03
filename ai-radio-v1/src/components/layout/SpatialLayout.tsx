@@ -29,6 +29,7 @@ interface Props {
   translationLines: LyricLine[];
   lyricMode: 'off' | 'original' | 'dual';
   onLyricModeChange: (m: 'off' | 'original' | 'dual') => void;
+  lyricMeshActive: boolean;
   messages: AIMessage[];
   orbit: OrbitRotation;
   cameraRef: RefObject<ParticleCameraState>;
@@ -45,7 +46,10 @@ interface Props {
 
 const STAGE_SPRING = { type: 'spring' as const, stiffness: 170, damping: 26, mass: 0.85 };
 
-/** Lyrics/UI parallax — orbit is handled by the 3D canvas camera, not CSS plane rotation. */
+/** Lyrics/UI parallax — camera-lock feel (Mineradio-style): the 3D cover
+ *  rotates around, while the lyric stage stays nearly fixed with a tiny
+ *  counter-sway (lag) instead of following the orbit. That counter-motion is
+ *  what creates the depth contrast between lyrics and particles. */
 function stageParallax(orbit: OrbitRotation, rightFocused: boolean) {
   if (rightFocused) {
     return {
@@ -57,9 +61,9 @@ function stageParallax(orbit: OrbitRotation, rightFocused: boolean) {
     };
   }
   return {
-    x: `${orbit.y * 0.12}px`,
-    y: `${orbit.x * 0.08}px`,
-    scale: 1 - Math.abs(orbit.x) * 0.0012,
+    x: `${-orbit.y * 0.055}px`,
+    y: `${-orbit.x * 0.04}px`,
+    scale: 1 + Math.abs(orbit.x) * 0.0006,
     opacity: 1,
     filter: 'blur(0px)',
   };
@@ -106,19 +110,22 @@ export default function SpatialLayout(p: Props) {
   return (
     <div className="relative w-full h-full pointer-events-none">
       <LyricStage cameraRef={p.cameraRef} dimmed={rightFocused}>
-        <LyricLight
-          track={p.track}
-          trackLyrics={p.trackLyrics}
-          lyricIndex={p.lyricIndex}
-          lyricLines={p.lyricLines}
-          translationLines={p.translationLines}
-          lyricMode={p.lyricMode}
-          onLyricModeChange={p.onLyricModeChange}
-          currentTime={p.currentTime}
-          realDuration={p.realDuration}
-          duration={p.duration}
-          isPlaying={p.isPlaying}
-        />
+        {!p.lyricMeshActive && (
+          <LyricLight
+            track={p.track}
+            trackLyrics={p.trackLyrics}
+            lyricIndex={p.lyricIndex}
+            lyricLines={p.lyricLines}
+            translationLines={p.translationLines}
+            lyricMode={p.lyricMode}
+            onLyricModeChange={p.onLyricModeChange}
+            currentTime={p.currentTime}
+            realDuration={p.realDuration}
+            duration={p.duration}
+            isPlaying={p.isPlaying}
+            parallax={p.orbit}
+          />
+        )}
       </LyricStage>
 
       {/* HUD — fixed to viewport; must stay outside orbit parallax (transform clips fixed children). */}

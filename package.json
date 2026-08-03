@@ -1,6 +1,6 @@
 {
   "name": "abyss-radio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Abyss Radio - Electron desktop music player (KuGou + NetEase)",
   "main": "desktop/main.cjs",
   "author": "Liu Yongkang",

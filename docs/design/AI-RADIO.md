@@ -21,7 +21,8 @@
 
 启动：根目录 `start.bat` → 后端 `:4000` / 前端 `:3000`。
 
-备份（清理前）：`E:\VM\AI_audio_bak_20260802`。决策单：`docs/COUNCIL-20260802.md`。
+备份（清理前）：`E:\VM\AI_audio_bak_20260802`。决策单：`docs/COUNCIL-20260802.md`。  
+现状快照：`docs/PROJECT-STATUS-20260803.md`。
 
 ## 设计原则（体验愿景）
 
