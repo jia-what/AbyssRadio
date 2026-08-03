@@ -118,7 +118,10 @@ export async function checkQr(key) {
     return { code: 801, message: '操作频繁，请稍候再试' };
   }
 
-  if (code === 200) {
+  if (code === 200 || (code === 803 && (result?.cookie || body.cookie))) {
+    // Netease's current QR flow: the "authorized" (803) response already
+    // carries the login cookie — polling again returns 800 (QR consumed),
+    // so 803+cookie must be treated as success, not "wait for 200".
     const cookieStr = extractNeteaseCookie({
       ...result,
       cookie: result?.cookie || body.cookie,
@@ -128,8 +131,10 @@ export async function checkQr(key) {
       sessions.set(key, { cookie: cookieStr, loginAt: Date.now() });
       return { code: 200, cookie: cookieStr };
     }
-    // Cookie not yet in response — keep client on confirm step
-    return { code: 803, message: '请在手机上确认登录' };
+    if (code === 200) {
+      // Cookie not yet in response — keep client on confirm step
+      return { code: 803, message: '请在手机上确认登录' };
+    }
   }
 
   if (code === 800) pendingQr.delete(key);

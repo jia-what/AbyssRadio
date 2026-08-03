@@ -43,6 +43,10 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
   const loggedInRef = useRef(false);
   /** Avoid duplicate QR sessions (StrictMode / effect re-runs). */
   const qrActivePlatformRef = useRef<Platform | null>(null);
+  // Re-entrancy guard: the bind-view useEffect auto-starts a QR AND the user
+  // may click 刷新/扫码 — without this, two fetchQrKey calls hit the backend
+  // 5s cooldown, the 2nd fails with "请求过于频繁" and NO QR code is shown.
+  const qrStartingRef = useRef(false);
 
   const loadPlaylists = useCallback(async (key: string) => {
     setLoading(true);
@@ -67,7 +71,7 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
     }
   }, []);
 
-  const startQrLogin = useCallback(async (pf: Platform) => {
+  const startQrLoginInner = useCallback(async (pf: Platform) => {
     stopQrPoll();
     loggedInRef.current = false;
     const pollGen = ++pollGenRef.current;
@@ -139,6 +143,17 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
       setError(e instanceof Error ? e.message : '获取二维码失败');
     }
   }, [loadPlaylists, stopQrPoll, onFocus]);
+
+  const startQrLogin = useCallback(async (pf: Platform) => {
+    if (qrStartingRef.current) return;
+    qrStartingRef.current = true;
+    try {
+      await startQrLoginInner(pf);
+    } finally {
+      // keep guard up briefly so effect+click double-invocation is absorbed
+      setTimeout(() => { qrStartingRef.current = false; }, 1200);
+    }
+  }, [startQrLoginInner]);
 
   useEffect(() => () => stopQrPoll(), [stopQrPoll]);
 

@@ -61,6 +61,8 @@ export function useRadioState() {
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [translationLines, setTranslationLines] = useState<LyricLine[]>([]);
   const [lyricMode, setLyricMode] = useState<'off' | 'original' | 'dual'>('dual');
+  /** Netease free-trial clip info (trial=true → URL is a 30s/60s preview) */
+  const [trialInfo, setTrialInfo] = useState<{ trial: boolean; trialLen: number } | null>(null);
   const [realDuration, setRealDuration] = useState(0); // actual audio duration from <audio>
   const [isSimulatedPlayback, setIsSimulatedPlayback] = useState(false);
 
@@ -277,10 +279,13 @@ export function useRadioState() {
       setTranslationLines(parseLRC(lrcPayload.tlyric));
 
       const audio = audioRef.current;
-      if (url && audio) {
+      const stream = url?.url ?? null;
+      if (stream && audio) {
         if (gen !== loadGenRef.current) return;
         setIsSimulatedPlayback(false);
-        audio.src = url;
+        // Netease free-trial clip → still playable; keep trial flag visible to UI
+        setTrialInfo(url?.trial ? { trial: true, trialLen: url.trialLen } : null);
+        audio.src = stream;
         audio.currentTime = 0;
         await audio.play();
         if (gen !== loadGenRef.current) {
@@ -434,6 +439,7 @@ export function useRadioState() {
       setPlaylist(tracks);
       setLyricLines([]);
       setTranslationLines([]);
+      setTrialInfo(null);
       setRealDuration(0);
       const audio = audioRef.current;
       if (audio) { audio.pause(); audio.src = ''; }
@@ -480,6 +486,7 @@ export function useRadioState() {
     setTrackSources(sources);
     setLyricLines([]);
     setTranslationLines([]);
+    setTrialInfo(null);
     setRealDuration(0);
     trackIndexRef.current = idx;
     setCurrentTrackIndex(idx);
@@ -548,7 +555,7 @@ export function useRadioState() {
     isPlaying, messages, isPortaling,
     currentTrack, playlist, progress, currentTime, duration, volume, isMuted,
     trackLyrics, lyricIndex, lyricLines, realDuration: displayDuration,
-    translationLines, lyricMode, setLyricMode,
+    translationLines, lyricMode, setLyricMode, trialInfo,
     isDemoPlayback: isSimulatedPlayback && isPlaying,
     audioRef,
     pulseAnalyserRef,

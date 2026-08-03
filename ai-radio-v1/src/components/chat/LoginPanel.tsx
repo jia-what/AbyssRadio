@@ -36,7 +36,8 @@ export default function LoginPanel({ isOpen, onClose, onPlayTrack }: LoginPanelP
   }, []);
 
   // Start QR login — 801 → 802/803 → 200; keep polling through confirm step
-  const startQr = useCallback(async () => {
+  const qrStartingRef = useRef(false);
+  const startQrInner = useCallback(async () => {
     stopPoll();
     setError('');
     setQrImg('');
@@ -96,6 +97,19 @@ export default function LoginPanel({ isOpen, onClose, onPlayTrack }: LoginPanelP
       setError(e instanceof Error ? e.message : '获取二维码失败');
     }
   }, [stopPoll]);
+
+  const startQr = useCallback(async () => {
+    // Re-entrancy guard: rapid double-clicks (or two buttons visible at once)
+    // must not fire two qr-key calls — the 2nd hits the 5s cooldown and the
+    // panel shows "请求过于频繁" with NO QR code generated.
+    if (qrStartingRef.current) return;
+    qrStartingRef.current = true;
+    try {
+      await startQrInner();
+    } finally {
+      setTimeout(() => { qrStartingRef.current = false; }, 800);
+    }
+  }, [startQrInner]);
 
   const loadPlaylists = async (key: string) => {
     try {
@@ -218,7 +232,7 @@ export default function LoginPanel({ isOpen, onClose, onPlayTrack }: LoginPanelP
         sessionKeyRef.current = data.key;
         setQrKey(data.key);
         loadPlaylists(data.key);
-        setError(result.partial ? result.message : '酷狗登录成功！');
+        setError(result.partial ? (result.message || '部分成功') : '酷狗登录成功！');
       } else if (result?.cancelled) {
         setError(result.message || '登录已取消');
       } else {

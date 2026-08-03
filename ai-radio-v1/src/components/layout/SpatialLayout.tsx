@@ -30,6 +30,7 @@ interface Props {
   lyricMode: 'off' | 'original' | 'dual';
   onLyricModeChange: (m: 'off' | 'original' | 'dual') => void;
   lyricMeshActive: boolean;
+  trialInfo: { trial: boolean; trialLen: number } | null;
   messages: AIMessage[];
   orbit: OrbitRotation;
   cameraRef: RefObject<ParticleCameraState>;
@@ -165,6 +166,7 @@ export default function SpatialLayout(p: Props) {
           onUnpin={() => unpin('bottom')}
           lyricMode={p.lyricMode}
           onLyricModeChange={p.onLyricModeChange}
+          trialInfo={p.trialInfo}
         />
       </motion.div>
 

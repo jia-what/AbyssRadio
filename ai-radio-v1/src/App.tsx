@@ -17,7 +17,7 @@ export default function App() {
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
     trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, beatAnalyserRef, isDemoPlayback,
-    translationLines, lyricMode, setLyricMode,
+    translationLines, lyricMode, setLyricMode, trialInfo,
   } = useRadioState();
 
   const handleSend = async (text: string) => {
@@ -250,6 +250,7 @@ export default function App() {
             lyricMode={lyricMode}
             onLyricModeChange={setLyricMode}
             lyricMeshActive={!!lyricMesh}
+            trialInfo={trialInfo}
             messages={messages}
             onTogglePlay={togglePlay}
             onNext={playNext}

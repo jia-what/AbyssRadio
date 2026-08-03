@@ -34,14 +34,23 @@ export async function searchMusic(
  * Tries Netease first, falls back to KuGou/Kuwo if it's a VIP trial.
  * @param keyword - search keyword for cross-source lookup
  * @param quality - KuGou quality tier: standard|exhigh|lossless|hires (default standard)
+ * @returns { url, playable, trial, trialLen } — trial=true when URL is a
+ *          Netease free-trial clip (frontend should show 试听 badge).
  */
+export interface MusicUrlResult {
+  url: string | null;
+  playable: boolean;
+  trial: boolean;
+  trialLen: number;
+}
+
 export async function getMusicUrl(
   id: string,
   source: string,
   keyword?: string,
   sessionKey?: string,
   quality?: string
-): Promise<string | null> {
+): Promise<MusicUrlResult> {
   // Only netease + kugou — kuwo Meting returns error JSON strings, not stream URLs
   const sources = source === 'kugou' ? 'kugou,netease' : 'netease,kugou';
   let apiUrl = `/api/music/url-smart?id=${encodeURIComponent(id)}&sources=${encodeURIComponent(sources)}`;
@@ -56,14 +65,21 @@ export async function getMusicUrl(
   if (sessionKey) apiUrl += `&key=${encodeURIComponent(sessionKey)}`;
   if (quality) apiUrl += `&quality=${encodeURIComponent(quality)}`;
   const res = await fetch(apiUrl);
-  if (!res.ok) return null;
+  if (!res.ok) return { url: null, playable: false, trial: false, trialLen: 0 };
   const data = await res.json();
   const streamUrl = data.url ?? null;
-  if (!streamUrl || !/^https?:\/\//i.test(String(streamUrl))) return null;
+  if (!streamUrl || !/^https?:\/\//i.test(String(streamUrl))) {
+    return { url: null, playable: false, trial: false, trialLen: 0 };
+  }
   let proxy = `/api/audio?url=${encodeURIComponent(streamUrl)}`;
   // KuGou VIP CDN often requires the bound session cookie on fetch
   if (sessionKey) proxy += `&key=${encodeURIComponent(sessionKey)}`;
-  return proxy;
+  return {
+    url: proxy,
+    playable: data.playable !== false,
+    trial: !!data.trial,
+    trialLen: data.trialLen ?? 0,
+  };
 }
 
 /**

@@ -1,62 +1,101 @@
 /**
- * NEAPI wrapper — uses NeteaseCloudMusicApiEnhanced to get VIP song URLs.
- * Invokes the song_url module directly with cookie authentication.
+ * NEAPI wrapper — NeteaseCloudMusicApiEnhanced: VIP song URLs + trial detection.
+ *
+ * P1 netease-promote (2026-08-03):
+ *  - song_url_v1 with level chain (lossless → exhigh → standard)
+ *  - freeTrialInfo parsing → { playable, trial, trialLen }
+ *  - fallback: song_url (br=320000) → Meting
  */
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 const NEAPI = require('@neteasecloudmusicapienhanced/api');
-const songUrlModule = require('@neteasecloudmusicapienhanced/api/module/song_url.js');
-const createOption = require('@neteasecloudmusicapienhanced/api/util/option.js');
+const songUrlV1 = require('@neteasecloudmusicapienhanced/api/module/song_url_v1.js');
+const songUrl = require('@neteasecloudmusicapienhanced/api/module/song_url.js');
 const createRequest = require('@neteasecloudmusicapienhanced/api/util/request.js');
 
 const envCookie = process.env.NETEASE_COOKIE || '';
 
+/** level chain: highest first; server falls back when a level is unavailable */
+const LEVEL_CHAIN = ['lossless', 'exhigh', 'standard'];
+
 /**
- * Get a playable song URL using Netease official API with cookie auth.
- * This can get full-length audio for VIP songs when a valid MUSIC_U cookie is provided.
- *
- * @param {string} songId - Netease song ID
- * @param {string} [cookieOverride] - session cookie to use instead of env cookie
- * @returns {Promise<string|null>} - MP3 URL or null
+ * Result of a Netease URL lookup:
+ *  - url: playable stream URL (proxy-ready) or null
+ *  - playable: full-length playback allowed (not a trial clip)
+ *  - trial: true when the URL is a 30s/60s trial fragment
+ *  - trialLen: trial length in seconds (0 when unknown)
  */
-export async function getVipUrl(songId, cookieOverride) {
-  const cookie = cookieOverride || envCookie;
-  if (!cookie) return null;
-  if (!songId) return null;
+function emptyResult() {
+  return { url: null, playable: false, trial: false, trialLen: 0 };
+}
 
-  try {
-    const query = {
-      id: songId,
-      br: '320000',
-      cookie: cookie,
-    };
-
-    const result = await songUrlModule(query, createRequest);
-
-    if (result?.status === 200 && result?.body?.data) {
-      const data = result.body.data;
-      if (Array.isArray(data) && data.length > 0) {
-        return data[0].url || null;
-      }
-    }
-    return null;
-  } catch (e) {
-    console.error('NEAPI getVipUrl error:', e.message);
-    return null;
+/** Parse NEAPI freeTrialInfo → { trial, trialLen }. */
+function parseTrial(freeTrialInfo) {
+  if (!freeTrialInfo || typeof freeTrialInfo !== 'object') return { trial: false, trialLen: 0 };
+  const fti = freeTrialInfo;
+  const end = Number(fti.freeTrialEndTime ?? 0);
+  const play = Number(fti.realPlayTime ?? 0);
+  if (end > 0 || play > 0) {
+    // end/play are ms since track start — clip length in seconds
+    return { trial: true, trialLen: Math.max(0, Math.round(Math.max(end, play) / 1000)) };
   }
+  return { trial: false, trialLen: 0 };
 }
 
 /**
- * Smart URL: tries Meting first, then NEAPI for VIP.
- * @param {string} songId - Netease song ID
- * @returns {Promise<string|null>}
+ * Get a playable Netease URL via song_url_v1 (level chain), with trial
+ * detection. Returns { url, playable, trial, trialLen }.
  */
-export async function getUrlNetease(songId, cookieOverride) {
-  // First try NEAPI (authenticated)
-  const vipUrl = await getVipUrl(songId, cookieOverride);
-  if (vipUrl) return vipUrl;
+export async function getUrlNeteaseSmart(
+  songId,
+  cookieOverride,
+) {
+  const cookie = cookieOverride || envCookie;
+  if (!songId) return emptyResult();
 
-  // Fallback to Meting (may return 30s trial)
-  return null;
+  // 1) song_url_v1 — level chain, works with and without cookie
+  for (const level of LEVEL_CHAIN) {
+    try {
+      const query = { id: String(songId), level, cookie: cookie || undefined };
+      const result = await songUrlV1(query, createRequest);
+      const body = result?.body;
+      if (result?.status !== 200 || !body?.data || !Array.isArray(body.data)) continue;
+      const entry = body.data[0];
+      if (!entry) continue;
+      const url = entry.url || null;
+      if (!url) continue;
+      const { trial, trialLen } = parseTrial(entry.freeTrialInfo);
+      return { url, playable: !trial && !!url, trial, trialLen };
+    } catch (e) {
+      // try next level
+    }
+  }
+
+  // 2) legacy song_url (br) — authenticated fallback
+  if (cookie) {
+    try {
+      const result = await songUrl({ id: String(songId), br: '320000', cookie }, createRequest);
+      const body = result?.body;
+      if (result?.status === 200 && body?.data && Array.isArray(body.data) && body.data[0]?.url) {
+        const entry = body.data[0];
+        const { trial, trialLen } = parseTrial(entry.freeTrialInfo);
+        return { url: entry.url, playable: !trial, trial, trialLen };
+      }
+    } catch (e) {
+      // fall through to Meting
+    }
+  }
+
+  // 3) Meting fallback — anonymous URL (free songs playable; VIP songs give a
+  //    30s trial clip, which the frontend flags via trial info).
+  try {
+    const { getUrl } = await import('./ncm.mjs');
+    const url = await getUrl(String(songId), 'netease');
+    if (url) return { url, playable: true, trial: false, trialLen: 0 };
+  } catch (e) {
+    // nothing left
+  }
+
+  return emptyResult();
 }

@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { Readable } from 'stream';
 import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie, isPlayableUrl } from './ncm.mjs';
-import { getUrlNetease } from './ncm-neapi.mjs';
+import { getUrlNeteaseSmart } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
 import { verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
@@ -103,13 +103,24 @@ app.get('/api/music/url-smart', async function(req, res) {
       : (sources.find((s) => s === 'netease' || s === 'kugou') || sources[0]);
 
     let url = null;
+    let playable = true;
+    let trial = false;
+    let trialLen = 0;
     if (primary === 'netease' && sources.includes('netease')) {
-      url = await getUrlNetease(id, neteaseCookie);
+      const nr = await getUrlNeteaseSmart(id, neteaseCookie);
+      url = nr.url;
+      playable = nr.playable;
+      trial = nr.trial;
+      trialLen = nr.trialLen;
     } else if (primary === 'kugou' && sources.includes('kugou') && kugouCookie) {
       url = await getKugouPlayUrl(id, kugouCookie, key, { quality: req.query.quality });
       if (!url) url = await getKugouUrlWithCookie(id, kugouCookie);
     } else if (sources.includes('netease')) {
-      url = await getUrlNetease(id, neteaseCookie);
+      const nr = await getUrlNeteaseSmart(id, neteaseCookie);
+      url = nr.url;
+      playable = nr.playable;
+      trial = nr.trial;
+      trialLen = nr.trialLen;
     }
 
     // Exact playlist ids must not cross-source search-fallback
@@ -122,7 +133,7 @@ app.get('/api/music/url-smart', async function(req, res) {
       return res.status(404).json({ error: 'no url found from any source' });
     }
     recordUrlResult(true);
-    res.json({ url: String(url).trim() });
+    res.json({ url: String(url).trim(), playable, trial, trialLen });
   } catch (e) {
     recordUrlResult(false);
     res.status(500).json({ error: e.message });
@@ -276,7 +287,8 @@ app.post('/api/player/play', express.json(), async function(req, res) {
           }
         } else {
           const cookie = fresh?.session?.platform === 'netease' ? fresh.cookie : undefined;
-          playUrl = await getUrlNetease(cur.id, cookie);
+          const nr = await getUrlNeteaseSmart(cur.id, cookie);
+          playUrl = nr.url;
         }
         if (!playUrl && !String(cur.id).includes('|')) {
           playUrl = await getUrlSmart(cur.id, [platform, 'netease', 'kugou'], cur.title, process.env.KUGOU_COOKIE);

@@ -25,6 +25,7 @@ interface Props {
   onUnpin: () => void;
   lyricMode: 'off' | 'original' | 'dual';
   onLyricModeChange: (m: 'off' | 'original' | 'dual') => void;
+  trialInfo: { trial: boolean; trialLen: number } | null;
 }
 
 const LYRIC_MODE_LABEL: Record<'off' | 'original' | 'dual', string> = {
@@ -36,7 +37,7 @@ const LYRIC_MODE_LABEL: Record<'off' | 'original' | 'dual', string> = {
 export default function BottomBar({
   visible, track, isPlaying, progress, duration, realDuration, currentTime,
   volume, isMuted, onTogglePlay, onNext, onPrev, onSeek, onVolumeChange, onToggleMute,
-  onPin, onUnpin, lyricMode, onLyricModeChange,
+  onPin, onUnpin, lyricMode, onLyricModeChange, trialInfo,
 }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [localProgress, setLocalProgress] = useState(progress);
@@ -226,7 +227,14 @@ export default function BottomBar({
             <div className="flex items-center gap-3 min-w-0 flex-1 basis-0 justify-start">
               <div className="w-10 h-10 rounded-lg bg-cover bg-center flex-shrink-0 border border-white/[0.06]" style={coverStyle} />
               <div className="min-w-0">
-                <div className="text-white/70 text-sm truncate leading-tight">{track?.title ?? '— — —'}</div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="text-white/70 text-sm truncate leading-tight">{track?.title ?? '— — —'}</div>
+                  {trialInfo?.trial && (
+                    <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full border border-amber-300/30 text-amber-200/70 bg-amber-400/10 leading-none">
+                      试听{trialInfo.trialLen > 0 ? ` ${trialInfo.trialLen}s` : ''}
+                    </span>
+                  )}
+                </div>
                 <div className="text-white/30 text-[11px] truncate">{track?.artist ?? ''}</div>
               </div>
             </div>
