@@ -65,13 +65,20 @@ function drawWave(
   energy: number,
 ) {
   const cy = waveCenterY(height);
-  const amp = Math.min(56, height * (0.038 + energy * 0.022));
   const pts = bins.length;
 
   ctx.clearRect(0, 0, width, height);
 
+  // Idle / near-flat: stay fully invisible (no baseline stroke).
+  let peak = 0;
+  for (let i = 0; i < pts; i++) peak = Math.max(peak, bins[i]);
+  const activity = Math.max(peak, energy);
+  if (activity < 0.025) return;
+
+  const amp = Math.min(56, height * (0.038 + energy * 0.022));
+  const visibility = Math.min(1, (activity - 0.025) / 0.12);
+
   // Gaussian envelope: tallest in the center, tapering to the edges
-  // envelope(i) = exp(-0.5 * ((i - mid) / (sigma * N))^2), sigma ~ 0.28
   const SIGMA = 0.28;
   const mid = (pts - 1) / 2;
   const sigmaN = SIGMA * pts;
@@ -86,15 +93,16 @@ function drawWave(
   ctx.beginPath();
   ctx.rect(0, Math.max(0, cy - amp * 2.8), width, height - Math.max(0, cy - amp * 2.8));
   ctx.clip();
+  ctx.globalAlpha = visibility;
 
   const top: number[] = [];
   const bot: number[] = [];
   for (let i = 0; i < pts; i++) {
     const v = bins[i];
     const ripple = Math.sin(i * 0.11 + phase) * 0.16;
-    const h = amp * (v * 0.88 + ripple * v + energy * 0.1);
-    // Apply gaussian window: center peaks, edges near baseline (keep a small floor)
-    const g = 0.08 + 0.92 * envelope[i];
+    // No floor height — flat bins must sit on cy so nothing reads as a baseline
+    const h = amp * Math.max(0, v * 0.88 + ripple * v + energy * 0.08 * v);
+    const g = envelope[i];
     top.push(cy - h * g);
     bot.push(cy + h * 0.22 * g);
   }
@@ -142,18 +150,21 @@ function drawWave(
   ctx.fillStyle = coreFill;
   ctx.fill();
 
-  ctx.beginPath();
-  for (let i = 0; i < pts; i++) {
-    const x = (i / (pts - 1)) * width;
-    if (i === 0) ctx.moveTo(x, top[i]);
-    else ctx.lineTo(x, top[i]);
+  // Soft crest only when there is real motion — never a full-width baseline stroke
+  if (activity > 0.06) {
+    ctx.beginPath();
+    for (let i = 0; i < pts; i++) {
+      const x = (i / (pts - 1)) * width;
+      if (i === 0) ctx.moveTo(x, top[i]);
+      else ctx.lineTo(x, top[i]);
+    }
+    ctx.strokeStyle = `rgba(${hr},${hg},${hb},${(0.1 + energy * 0.12) * visibility})`;
+    ctx.lineWidth = 1.1;
+    ctx.shadowColor = `rgba(${cr},${cg},${cb},0.28)`;
+    ctx.shadowBlur = 6 + energy * 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
   }
-  ctx.strokeStyle = `rgba(${hr},${hg},${hb},${0.18 + energy * 0.14})`;
-  ctx.lineWidth = 1.2;
-  ctx.shadowColor = `rgba(${cr},${cg},${cb},0.35)`;
-  ctx.shadowBlur = 8 + energy * 10;
-  ctx.stroke();
-  ctx.shadowBlur = 0;
 
   ctx.restore();
 }

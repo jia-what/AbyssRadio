@@ -185,7 +185,7 @@ export default function SpatialLayout(p: Props) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed top-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+            className="fixed top-5 inset-x-0 z-50 flex justify-center pointer-events-none"
           >
             <div className="liquid-glass rounded-full px-4 py-1.5 text-[10px] text-white/30 tracking-wide">
               AI Radio · 有 AI 陪聊的听歌空间 · 角落唤出 AI / 歌单

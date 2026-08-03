@@ -203,7 +203,7 @@ export default function App() {
   }, [lyricMode, lyricIndex, trackLyrics, lyricLines, translationLines, currentTime, realDuration, duration, coverPalette, currentTrack]);
 
   return (
-    <div className="relative w-full h-screen bg-[#050508] overflow-hidden font-sans">
+    <div className="relative w-full h-full min-h-0 bg-[#050508] overflow-hidden font-sans">
       <PulseProvider
         audioRef={audioRef}
         analyserRef={pulseAnalyserRef}

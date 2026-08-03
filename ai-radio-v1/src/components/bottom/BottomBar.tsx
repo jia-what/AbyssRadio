@@ -181,14 +181,14 @@ export default function BottomBar({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0 }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 pointer-events-auto flex flex-col gap-2.5"
+          className="fixed bottom-0 inset-x-0 z-40 px-4 pb-4 pointer-events-auto flex flex-col items-center gap-2.5"
           onMouseEnter={onPin}
           onMouseLeave={onUnpin}
         >
-          {/* Progress — above the pill, in normal flow */}
+          {/* Progress — same width as the glass pill so L/R margins stay equal (esp. Electron) */}
           <div
             ref={progressRef}
-            className="w-full h-5 flex items-center shrink-0 cursor-pointer touch-none group/progress"
+            className="w-full max-w-4xl h-5 flex items-center shrink-0 cursor-pointer touch-none group/progress"
             onMouseDown={handleProgressDown}
             onTouchStart={handleProgressTouch}
             role="slider"
@@ -219,11 +219,11 @@ export default function BottomBar({
           </div>
 
           <div
-            className="mx-auto max-w-4xl w-full liquid-glass rounded-full px-5 py-3 flex items-center gap-4 shrink-0"
+            className="w-full max-w-4xl liquid-glass rounded-full px-5 py-3 flex items-center gap-3 shrink-0"
             style={{ backdropFilter: 'blur(12px)' }}
           >
-            {/* Track info */}
-            <div className="flex items-center gap-3 min-w-0 flex-shrink-0 w-[200px]">
+            {/* Track info — left third */}
+            <div className="flex items-center gap-3 min-w-0 flex-1 basis-0 justify-start">
               <div className="w-10 h-10 rounded-lg bg-cover bg-center flex-shrink-0 border border-white/[0.06]" style={coverStyle} />
               <div className="min-w-0">
                 <div className="text-white/70 text-sm truncate leading-tight">{track?.title ?? '— — —'}</div>
@@ -231,8 +231,8 @@ export default function BottomBar({
               </div>
             </div>
 
-            {/* Controls */}
-            <div className="flex items-center justify-center gap-5 flex-1">
+            {/* Controls — true center */}
+            <div className="flex items-center justify-center gap-5 flex-shrink-0">
               <button onClick={onPrev} className="text-white/35 hover:text-white/65 transition-colors duration-500">
                 <SkipBack size={16} />
               </button>
@@ -250,14 +250,13 @@ export default function BottomBar({
               </button>
             </div>
 
-            {/* Time + volume */}
-            <div className="flex items-center gap-4 flex-shrink-0">
+            {/* Time + volume — right third, mirrored width of left */}
+            <div className="flex items-center gap-3 min-w-0 flex-1 basis-0 justify-end">
               <span className="text-[10px] text-white/25 tracking-wide tabular-nums whitespace-nowrap">
                 {formatTime(isDragging ? (displayProgress / 100) * displayDur : currentTime)}
                 {' / '}
                 {formatTime(displayDur)}
               </span>
-              {/* Lyric mode toggle — inline control in the bar (defect 7) */}
               <button
                 type="button"
                 onClick={() => {
@@ -271,7 +270,7 @@ export default function BottomBar({
                 {LYRIC_MODE_LABEL[lyricMode]}
               </button>
               <div
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 shrink-0"
                 onMouseEnter={() => setVolHover(true)}
                 onMouseLeave={() => setVolHover(false)}
               >
