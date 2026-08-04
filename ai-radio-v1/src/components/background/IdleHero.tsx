@@ -127,7 +127,7 @@ export default function IdleHero({ active }: { active: boolean }) {
                 lineHeight: 1.05,
               }}
             >
-              Abyss <em className="italic font-normal">Radio</em>
+              Abyss{' '}<em className="italic font-normal">Radio</em>
             </h1>
 
             <p className="mt-8 max-w-xl text-white/75 text-sm md:text-base leading-relaxed px-4">

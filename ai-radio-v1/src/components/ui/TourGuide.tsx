@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 /**
@@ -114,12 +114,25 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       // 左缘/右缘触发条: 高亮范围沿边缘拉长, 贴合"整条边缘热区"的交互语义
       const isEdgeBar = s.selector.includes('aria-label="打开 AI"') || s.selector.includes('aria-label="打开歌单"');
       const pad = isEdgeBar ? 0 : 10;
+      // 边缘步骤: 框向屏内偏移, 圆角不被视口裁切; 宽度固定 60px, 左右对称距边 14px
+      const edgeInset = 14;
+      const isLeftEdge = isEdgeBar && r.left < window.innerWidth / 2;
       const expanded: DOMRect = {
-        left: isEdgeBar ? Math.max(4, r.left - 6) : Math.max(8, r.left - pad),
+        left: isEdgeBar
+          ? isLeftEdge
+            ? edgeInset
+            : window.innerWidth - edgeInset - 60
+          : Math.max(8, r.left - pad),
         top: isEdgeBar ? Math.max(4, r.top - 56) : Math.max(8, r.top - pad),
-        width: isEdgeBar ? Math.min(window.innerWidth - 16, r.width + 12) : Math.min(window.innerWidth - 16, r.width + pad * 2),
+        width: isEdgeBar
+          ? 60
+          : Math.min(window.innerWidth - 16, r.width + pad * 2),
         height: isEdgeBar ? Math.min(window.innerHeight - 8, r.height + 112) : Math.min(window.innerHeight - 16, r.height + pad * 2),
-        right: Math.min(window.innerWidth - 4, r.right + 6),
+        right: isEdgeBar
+          ? isLeftEdge
+            ? edgeInset + 60
+            : window.innerWidth - edgeInset
+          : Math.min(window.innerWidth - 8, r.right + pad),
         bottom: Math.min(window.innerHeight - 4, r.bottom + 56),
       } as DOMRect;
       setRect(expanded);
@@ -146,17 +159,16 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
     if (open) setStepIndex(0);
   }, [open]);
 
-  // 定位目标: 打开时和步骤变化时重新定位
-  useEffect(() => {
+  // 定位目标: 打开/切步时同步定位 (useLayoutEffect 在绘制前执行, 避免高亮环
+  // 从旧位置跳到新位置产生闪烁); 面板动画完成后延迟补一次定位兜底
+  useLayoutEffect(() => {
     if (!open) return;
-    const raf = requestAnimationFrame(() => {
-      locate();
-      setTimeout(locate, 200);
-    });
+    locate();
+    const t1 = setTimeout(locate, 200);
     const onResize = () => locate();
     window.addEventListener('resize', onResize);
     return () => {
-      cancelAnimationFrame(raf);
+      clearTimeout(t1);
       window.removeEventListener('resize', onResize);
     };
   }, [open, locate]);
@@ -168,9 +180,9 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       return;
     }
     setStepIndex((i) => i + 1);
-    requestAnimationFrame(locate);
-    setTimeout(locate, 180);
-  }, [stepIndex, steps.length, onClose, locate]);
+    // 定位交给 useLayoutEffect ([open, locate] 依赖, locate 随 stepIndex 重建),
+    // 这里不能再 rAF/setTimeout 调旧闭包 — 会把环拉回旧步骤位置造成闪烁
+  }, [stepIndex, steps.length, onClose]);
 
   const skip = useCallback(() => {
     markGuideSeen();
@@ -201,8 +213,11 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       cardX = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width / 2 - cardW / 2));
       cardY = Math.max(16, rect.top - 210);
     } else if (isEdgeStep) {
-      // 边缘热区步骤: 卡片放高亮环右侧, 垂直与环中心对齐, 避免重叠
-      cardX = Math.min(window.innerWidth - cardW - 16, rect.right + 18);
+      // 边缘热区步骤: 卡片放环的内侧 (左缘环→卡在右, 右缘环→卡在左), 不遮环
+      const ringIsLeft = rect.left < window.innerWidth / 2;
+      cardX = ringIsLeft
+        ? Math.min(window.innerWidth - cardW - 16, rect.right + 18)
+        : Math.max(16, rect.left - cardW - 18);
       cardY = Math.max(16, rect.top + rect.height / 2 - 120);
     } else {
       cardX = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width / 2 - cardW / 2));
@@ -230,7 +245,7 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
             className="absolute inset-0"
             style={{
               background: rect && !isFullscreenStep
-                ? `radial-gradient(circle at ${rect.left + rect.width / 2}px ${rect.top + rect.height / 2}px, transparent 0px, transparent ${Math.min(rect.width, rect.height) / 2 - 30}px, rgba(2,4,10,0.62) ${Math.max(rect.width, rect.height) / 2 + 40}px, rgba(2,4,10,0.82) 100%)`
+                ? `radial-gradient(ellipse at ${rect.left + rect.width / 2}px ${rect.top + rect.height / 2}px, transparent 0px, transparent ${Math.max(rect.width, rect.height) * 0.52}px, rgba(2,4,10,0.62) ${Math.max(rect.width, rect.height) * 0.72}px, rgba(2,4,10,0.84) 100%)`
                 : 'rgba(2,4,10,0.42)',
             }}
           />
