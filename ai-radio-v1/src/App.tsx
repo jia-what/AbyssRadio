@@ -4,7 +4,6 @@ import PortalAnimation from './components/portal/PortalAnimation';
 import CoverParticleField from './components/background/CoverParticleField';
 import CoverAmbientLight from './components/background/CoverAmbientLight';
 import CoverPulseWave from './components/background/CoverPulseWave';
-import BootIntro from './components/intro/BootIntro';
 import StandbyScreen from './components/intro/StandbyScreen';
 import { PulseProvider } from './context/PulseContext';
 import { useRadioState } from './hooks/useRadioState';
@@ -12,7 +11,8 @@ import { useParticleCamera } from './hooks/useParticleCamera';
 import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
 
 export default function App() {
-  const [phase, setPhase] = useState<'boot' | 'standby' | 'main'>('boot');
+  // 状态机: boot(开场动画, 暂未启用) → standby(待机界面, 当前默认入口) → main(主界面)
+  const [phase, setPhase] = useState<'boot' | 'standby' | 'main'>('standby');
   const enterStandby = useCallback(() => setPhase('standby'), []);
   const enterMain = useCallback(() => setPhase('main'), []);
   const [rightFocused, setRightFocused] = useState(false);
@@ -209,7 +209,7 @@ export default function App() {
 
   return (
     <div className="relative w-full h-full min-h-0 bg-[#050508] overflow-hidden font-sans">
-      {phase === 'boot' && <BootIntro onComplete={enterStandby} />}
+      {phase === 'boot' && null /* BootIntro 已备份在 git 1f6fc4b, 暂未启用 */}
       {phase === 'standby' && <StandbyScreen onEnter={enterMain} />}
       <PulseProvider
         audioRef={audioRef}
