@@ -7,24 +7,31 @@ import ShinyText from '../ui/ShinyText';
 /**
  * StandbyScreen — 动态待机画面 (默认入口)
  *
- * 结构:
- *   MagicRings 冷青声呐环循环动画 (全屏背景)
- *   + 中心字标 ABYSS RADIO (渐入)
- *   + 副标 DEEP SIGNAL
- *   + SpecularButton「点击进入」按钮 (WebGL 高光扫过) → 点击 → 整体淡出 → 主界面
- *
- * 入口唯一: 只有按钮可进入 (2026-08-04 老板拍板: 去掉整屏点击/任意处继续,
- * 避免"整屏可点 + 按钮"双入口冲突)。
+ * 进入流程:
+ *   点击 → 立刻 onWarmMain（父级挂载主场景叠在底下）
+ *        → 暂停声呐环 rAF（腾 GPU）
+ *        → 淡出 620ms → onDismiss 卸待机
  */
 
-export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
+export default function StandbyScreen({
+  onWarmMain,
+  onDismiss,
+}: {
+  onWarmMain: () => void;
+  onDismiss: () => void;
+}) {
   const [exiting, setExiting] = useState(false);
 
   const handleEnter = () => {
     if (exiting) return;
     setExiting(true);
-    // 淡出动画完成后通知父组件切换主界面
-    setTimeout(onEnter, 620);
+    // 先停环，再隔两帧暖机主场景；按钮保持挂载随整页淡出（避免拆 WebGL 闪白）
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        onWarmMain();
+      });
+    });
+    setTimeout(onDismiss, 620);
   };
 
   return (
@@ -34,7 +41,7 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
       animate={{ opacity: exiting ? 0 : 1 }}
       transition={{ duration: 0.6, ease: 'easeInOut' }}
     >
-      {/* 循环声呐环背景 */}
+      {/* 循环声呐环背景 — 退出时暂停渲染，避免与主场景 WebGL 抢帧 */}
       <MagicRings
         color="#3ec8ff"
         colorTwo="#5a7bff"
@@ -53,11 +60,12 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
         followMouse
         mouseInfluence={0.12}
         parallax={0.04}
+        paused={exiting}
       />
 
       {/* 中央字标组 + 按钮 (按钮在标题正下方) */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        {/* 主标题 — 流光扫过效果 */}
+        {/* 主标题 — 流光扫过；不用 filter:blur（合成层昂贵，开局易卡） */}
         <motion.div
           className="font-semibold"
           style={{
@@ -65,36 +73,40 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
             letterSpacing: '0.3em',
             paddingLeft: '0.3em',
           }}
-          initial={{ opacity: 0, y: 18, filter: 'blur(10px)' }}
-          animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
         >
           <ShinyText
             text="ABYSS RADIO"
-            speed={3.5}
-            color="rgba(255,255,255,0.4)"
-            shineColor="#ffffff"
-            spread={90}
+            speed={3.2}
+            delay={1}
+            color="#8fa3b8"
+            shineColor="#d7e8f5"
+            spread={120}
             direction="left"
-            delay={0.8}
-            stops={[0.46, 0.5, 0.54]}
+            yoyo={false}
+            pauseOnHover={false}
+            stops={[0.35, 0.5, 0.65]}
           />
         </motion.div>
 
-        {/* 按钮 — 标题正下方, pointer-events-auto 恢复可点 */}
+        {/* 按钮 — 淡出期间保持挂载，避免 WebGL canvas 销毁闪白块 */}
         <motion.div
           className="mt-10 pointer-events-auto"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.9, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+          style={{ pointerEvents: exiting ? 'none' : 'auto' }}
         >
           <SpecularButton
+            className="standby-enter-btn"
             size="md"
             radius={999}
             tint="#ffffff"
             tintOpacity={0.05}
             blur={8}
-            textColor="rgba(255,255,255,0.9)"
+            textColor="rgba(210, 230, 255, 0.88)"
             lineColor="#8fd0ff"
             baseColor="#2a4a6a"
             intensity={1.2}
@@ -104,6 +116,8 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
             speed={0.4}
             followMouse
             proximity={300}
+            paused={exiting}
+            disabled={exiting}
             onClick={handleEnter}
           >
             点击进入

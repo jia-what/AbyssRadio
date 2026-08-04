@@ -120,7 +120,7 @@ export default function BottomBar({
 
   const coverStyle = isImageUrl(track?.cover)
     ? { backgroundImage: `url(${coverUrl(track?.cover)})` }
-    : { background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(10,10,26,0.8))' };
+    : { background: 'linear-gradient(135deg, rgba(80,120,180,0.12), rgba(8,10,18,0.9))' };
 
   const fillTransition = snapProgress || isDragging
     ? 'none'
@@ -180,14 +180,14 @@ export default function BottomBar({
               <div className="w-10 h-10 rounded-lg bg-cover bg-center flex-shrink-0 border border-white/[0.06]" style={coverStyle} />
               <div className="min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="text-white/70 text-sm truncate leading-tight">{track?.title ?? '— — —'}</div>
+                  <div className="text-white/70 text-sm truncate leading-tight">{track?.title ?? '等待点播'}</div>
                   {trialInfo?.trial && (
                     <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full border border-amber-300/30 text-amber-200/70 bg-amber-400/10 leading-none">
                       试听{trialInfo.trialLen > 0 ? ` ${trialInfo.trialLen}s` : ''}
                     </span>
                   )}
                 </div>
-                <div className="text-white/30 text-[11px] truncate">{track?.artist ?? ''}</div>
+                <div className="text-white/30 text-[11px] truncate">{track?.artist ?? '右侧歌单 · 扫码后播放'}</div>
               </div>
             </div>
 

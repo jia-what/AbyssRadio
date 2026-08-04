@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import { coverUrl } from '../../utils/img';
+import { coverUrl, isImageUrl } from '../../utils/img';
 import { useBeatPulseRef } from '../../context/BeatPulseContext';
 import { usePulseBands, usePulseFocus } from '../../context/PulseContext';
 import type { PulseBands } from '../../context/PulseContext';
@@ -236,6 +236,7 @@ export default function CoverParticleField({
     let edgeTex = uploadTexture(gl, placeholder, false);
     let hasCover = 0;
     let hasDepth = 0;
+    let coverAlpha = 0; // 无真封面时粒子场隐去；加载后淡入衔接点播
     let colorMixT = 1;
     let mixStart = 0;
     let mixFrom = 1;
@@ -305,7 +306,8 @@ export default function CoverParticleField({
     };
 
     const loadCover = async (rawUrl: string | null, forKey: string) => {
-      const proxied = rawUrl ? coverUrl(rawUrl) : '';
+      // 仅真图片 URL；渐变色字符串等假封面一律当无封面
+      const proxied = rawUrl && isImageUrl(rawUrl) ? coverUrl(rawUrl) : '';
       if (!proxied) {
         if (forKey !== focusKeyOf()) return;
         hasCover = 0;
@@ -389,7 +391,11 @@ export default function CoverParticleField({
       gl.uniform1f(uDepth, 0.55);
       gl.uniform1f(uPixel, dpr);
       gl.uniform1f(uPointScale, 1.45);
-      gl.uniform1f(uAlpha, 0.94);
+      // 空闲隐场 → 点播后封面就绪淡入（~0.9s，与 IdleHero 退出叠化）
+      const alphaTarget = hasCover > 0.5 ? 0.94 : 0;
+      coverAlpha += (alphaTarget - coverAlpha) * 0.038;
+      if (Math.abs(alphaTarget - coverAlpha) < 0.002) coverAlpha = alphaTarget;
+      gl.uniform1f(uAlpha, coverAlpha);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, coverTex);

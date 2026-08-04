@@ -82,3 +82,13 @@
   position: relative;
   z-index: 2;
 }
+
+/* 待机「点击进入」— 细体中文 + 克制字距，避免 inherit 宽 tracking 显土 */
+.specular-button.standby-enter-btn {
+  font-family: 'Noto Sans SC', 'Satoshi', system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 0.8125rem;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  font-feature-settings: 'kern' 1;
+}

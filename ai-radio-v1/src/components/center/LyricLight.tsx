@@ -4,7 +4,7 @@ import type { Track } from '../../types';
 import type { LyricLine } from '../../utils/parseLRC';
 
 interface Props {
-  track: Track | null;
+  track: Track;
   trackLyrics: string[];
   lyricIndex: number;
   lyricLines: LyricLine[];
@@ -112,7 +112,7 @@ export default function LyricLight({
     <div className="text-center w-full">
       {lyricMode === 'off' ? (
         <div className="text-[clamp(20px,3.5vw,40px)] font-bold text-white/25 tracking-tight">
-          {track?.title ?? '— — —'}
+          {track.title}
         </div>
       ) : hasLyrics ? (
         <div className="flex flex-col items-center justify-center gap-5">
@@ -162,24 +162,23 @@ export default function LyricLight({
         </div>
       ) : (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+          key={track.id}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
           className="space-y-2"
         >
           <div
             className="text-[clamp(20px,3.5vw,40px)] font-bold text-white/50 tracking-tight"
             style={{ textShadow: '0 0 40px rgba(96,165,250,0.08)' }}
           >
-            {track?.title ?? '— — —'}
+            {track.title}
           </div>
           <div className="text-[clamp(12px,1.8vw,18px)] text-white/25 font-light tracking-wide">
-            {track?.artist ?? ''}
+            {track.artist}
           </div>
         </motion.div>
       )}
-
-      {/* Lyric mode toggle lives in BottomBar (defect 7 — no floating buttons) */}
     </div>
   );
 }

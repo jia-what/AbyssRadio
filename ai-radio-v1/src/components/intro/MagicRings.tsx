@@ -87,6 +87,8 @@ export interface MagicRingsProps {
   hoverScale?: number;
   parallax?: number;
   clickBurst?: boolean;
+  /** 暂停 rAF 渲染（进入主界面淡出时腾出 GPU） */
+  paused?: boolean;
 }
 
 export default function MagicRings({
@@ -111,6 +113,7 @@ export default function MagicRings({
   hoverScale = 1.2,
   parallax = 0.05,
   clickBurst = false,
+  paused = false,
 }: MagicRingsProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const propsRef = useRef<MagicRingsProps>({});
@@ -119,6 +122,8 @@ export default function MagicRings({
   const hoverAmountRef = useRef(0);
   const isHoveredRef = useRef(false);
   const burstRef = useRef(0);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   propsRef.current = {
     color, colorTwo, speed, ringCount, attenuation, lineThickness, baseRadius,
@@ -184,7 +189,8 @@ export default function MagicRings({
     const resize = () => {
       const w = mount.clientWidth;
       const h = mount.clientHeight;
-      const dpr = Math.min(window.devicePixelRatio, 2);
+      // 待机全屏着色器：DPR 封顶 1.5，减轻开局 fill-rate
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       renderer.setSize(w, h);
       renderer.setPixelRatio(dpr);
       uniforms.uResolution.value.set(w * dpr, h * dpr);
@@ -214,6 +220,7 @@ export default function MagicRings({
     let frameId = 0;
     const animate = (t: number) => {
       frameId = requestAnimationFrame(animate);
+      if (pausedRef.current) return;
       const p = propsRef.current;
       smoothMouseRef.current[0] += (mouseRef.current[0] - smoothMouseRef.current[0]) * 0.08;
       smoothMouseRef.current[1] += (mouseRef.current[1] - smoothMouseRef.current[1]) * 0.08;

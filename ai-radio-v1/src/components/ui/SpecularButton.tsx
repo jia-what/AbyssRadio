@@ -91,6 +91,8 @@ export interface SpecularButtonProps {
   proximity?: number;
   autoAnimate?: boolean;
   disabled?: boolean;
+  /** 暂停 WebGL 绘制（退出淡出时用，避免拆 canvas 闪白） */
+  paused?: boolean;
   onClick?: MouseEventHandler<HTMLButtonElement>;
   className?: string;
   type?: 'button' | 'submit' | 'reset';
@@ -115,6 +117,7 @@ const SpecularButton = ({
   proximity = 250,
   autoAnimate = false,
   disabled = false,
+  paused = false,
   onClick,
   className = '',
   type = 'button',
@@ -122,6 +125,8 @@ const SpecularButton = ({
   const btnRef = useRef<HTMLButtonElement>(null);
   const fxRef = useRef<HTMLSpanElement>(null);
   const propsRef = useRef<Record<string, number | string | boolean>>({});
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   propsRef.current = { radius, lineColor, baseColor, intensity, shineSize, shineFade, thickness, speed, followMouse, proximity, autoAnimate };
 
@@ -160,6 +165,11 @@ const SpecularButton = ({
     });
 
     const mesh = new Mesh(gl, { geometry, program });
+    gl.canvas.style.display = 'block';
+    gl.canvas.style.width = '100%';
+    gl.canvas.style.height = '100%';
+    // 防止销毁/失焦时浏览器把 canvas 刷成白底
+    gl.canvas.style.background = 'transparent';
     fx.appendChild(gl.canvas);
 
     const sizeRef = { w: 1, h: 1 };
@@ -209,6 +219,7 @@ const SpecularButton = ({
 
     const update = (now: number) => {
       raf = requestAnimationFrame(update);
+      if (pausedRef.current) return;
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       const p = propsRef.current;
@@ -240,8 +251,21 @@ const SpecularButton = ({
       cancelAnimationFrame(raf);
       ro.disconnect();
       window.removeEventListener('pointermove', onPointerMove);
+      // 先藏住再清透明，最后再 loseContext，避免全屏下闪白色长条
+      try {
+        gl.canvas.style.visibility = 'hidden';
+        gl.canvas.style.opacity = '0';
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      } catch {
+        // context may already be lost
+      }
       if (gl.canvas.parentNode === fx) fx.removeChild(gl.canvas);
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      try {
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+      } catch {
+        // ignore
+      }
     };
   }, []);
 

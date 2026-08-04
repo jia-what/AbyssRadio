@@ -71,13 +71,15 @@ function stageParallax(orbit: OrbitRotation, rightFocused: boolean) {
 }
 
 export default function SpatialLayout(p: Props) {
-  const { panels, pin, unpin, toggle } = useEdgePanels();
+  const { panels, pin, unpin, toggle, setBottomEnabled } = useEdgePanels();
   const [showHint, setShowHint] = useState(true);
   const [rightFocused, setRightFocused] = useState(false);
+  const hasTrack = !!p.track;
 
+  // 有真曲才启用底栏；空闲英雄页完全不出现播放栏
   useEffect(() => {
-    pin('bottom');
-  }, [pin]);
+    setBottomEnabled(hasTrack);
+  }, [hasTrack, setBottomEnabled]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowHint(false), 4000);
@@ -111,7 +113,7 @@ export default function SpatialLayout(p: Props) {
   return (
     <div className="relative w-full h-full pointer-events-none">
       <LyricStage cameraRef={p.cameraRef} dimmed={rightFocused}>
-        {!p.lyricMeshActive && (
+        {!p.lyricMeshActive && p.track && (
           <LyricLight
             track={p.track}
             trackLyrics={p.trackLyrics}
@@ -147,7 +149,7 @@ export default function SpatialLayout(p: Props) {
         transition={STAGE_SPRING}
       >
         <BottomBar
-          visible={panels.bottom}
+          visible={hasTrack && panels.bottom}
           track={p.track}
           isPlaying={p.isPlaying}
           progress={p.progress}
@@ -190,7 +192,7 @@ export default function SpatialLayout(p: Props) {
             className="fixed top-5 inset-x-0 z-50 flex justify-center pointer-events-none"
           >
             <div className="liquid-glass rounded-full px-4 py-1.5 text-[10px] text-white/30 tracking-wide">
-              AI Radio · 有 AI 陪聊的听歌空间 · 角落唤出 AI / 歌单
+              贴边唤出 · 左 AI · 右歌单 · 下播放
             </div>
           </motion.div>
         )}

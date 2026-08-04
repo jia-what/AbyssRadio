@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, startTransition } from 'react';
 import SpatialLayout from './components/layout/SpatialLayout';
 import PortalAnimation from './components/portal/PortalAnimation';
 import CoverParticleField from './components/background/CoverParticleField';
 import CoverAmbientLight from './components/background/CoverAmbientLight';
 import CoverPulseWave from './components/background/CoverPulseWave';
+import IdleHero from './components/background/IdleHero';
 import StandbyScreen from './components/intro/StandbyScreen';
 import { PulseProvider } from './context/PulseContext';
 import { useRadioState } from './hooks/useRadioState';
@@ -11,10 +12,14 @@ import { useParticleCamera } from './hooks/useParticleCamera';
 import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
 
 export default function App() {
-  // 状态机: boot(开场动画, 暂未启用) → standby(待机界面, 当前默认入口) → main(主界面)
-  const [phase, setPhase] = useState<'boot' | 'standby' | 'main'>('standby');
-  const enterStandby = useCallback(() => setPhase('standby'), []);
-  const enterMain = useCallback(() => setPhase('main'), []);
+  // 待机默认入口：主场景延后挂载，避免开局同时起 3 套 WebGL（环/按钮/封面粒子）卡顿。
+  // 点击进入 → 立刻暖机挂载 main（叠在淡出底下）→ 淡出结束再卸待机。
+  const [mainActive, setMainActive] = useState(false);
+  const [standbyVisible, setStandbyVisible] = useState(true);
+  const warmMain = useCallback(() => {
+    startTransition(() => setMainActive(true));
+  }, []);
+  const dismissStandby = useCallback(() => setStandbyVisible(false), []);
   const [rightFocused, setRightFocused] = useState(false);
   const { parallax, cameraRef, layerRef, handlers } = useParticleCamera(!rightFocused);
   const {
@@ -209,8 +214,10 @@ export default function App() {
 
   return (
     <div className="relative w-full h-full min-h-0 bg-[#050508] overflow-hidden font-sans">
-      {phase === 'boot' && null /* BootIntro 已备份在 git 1f6fc4b, 暂未启用 */}
-      {phase === 'standby' && <StandbyScreen onEnter={enterMain} />}
+      {standbyVisible && (
+        <StandbyScreen onWarmMain={warmMain} onDismiss={dismissStandby} />
+      )}
+      {mainActive && (
       <PulseProvider
         audioRef={audioRef}
         analyserRef={pulseAnalyserRef}
@@ -230,6 +237,8 @@ export default function App() {
           isDemoPlayback={isDemoPlayback}
         />
         <CoverParticleField cameraRef={cameraRef} lyricMesh={lyricMesh} />
+        {/* 未点播英雄层 ↔ 封面粒子交叉淡入淡出 */}
+        <IdleHero active={!currentTrack} />
         {isPortaling && <PortalAnimation onComplete={endPortal} />}
 
         <div
@@ -271,6 +280,7 @@ export default function App() {
           />
         </div>
       </PulseProvider>
+      )}
     </div>
   );
 }

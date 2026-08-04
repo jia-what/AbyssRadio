@@ -3,46 +3,10 @@ import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 
-const DEFAULT_PLAYLIST: Track[] = [
-  { id: '1', title: 'Neon Dusk', artist: 'Abyss Collective', cover: '#1a0a2e-#16213e', duration: 187 },
-  { id: '2', title: 'Depth Charge', artist: 'Luna Waveform', cover: '#0f0c29-#302b63', duration: 243 },
-  { id: '3', title: 'Hydrostatic', artist: 'Mariana', cover: '#020111-#20124d', duration: 201 },
-  { id: '4', title: 'Echo Locate', artist: 'Soma Drift', cover: '#0a0a2e-#1a1a4e', duration: 176 },
-  { id: '5', title: 'Biolume', artist: 'Abyss Collective', cover: '#0b0b1a-#1a3a5c', duration: 214 },
-];
-
-const DEFAULT_LYRICS: Record<string, string[]> = {
-  '1': [
-    "under the neon dusk", "the city hums a low frequency", "streets of glass and rust",
-    "we move like ghosts in memory", "the signal finds us anyway", "through static and decay",
-    "neon dusk, hold me close", "before the light fades away",
-  ],
-  '2': [
-    "descending into pressure", "where the light has never been", "silent bells of the abyss",
-    "ringing somewhere within", "depth charge, depth charge", "waking something ancient",
-    "in the crushing dark", "we listen for the spark",
-  ],
-  '3': [
-    "hydrostatic equilibrium", "between the surface and the floor", "my lungs are full of ocean",
-    "and I don't need air anymore", "the weight of all that water", "is holding me together",
-    "hydrostatic, hear my voice", "I've made my choice",
-  ],
-  '4': [
-    "echo locate, echo locate", "send a pulse into the void", "wait for it to resonate",
-    "tell me I'm not destroyed", "the signal bounces back to me", "a ghost of what used to be",
-    "echo locate, I'm still here", "barely alive but clear",
-  ],
-  '5': [
-    "biolume, biolume", "light from where the sun can't reach", "every cell a tiny moon",
-    "teaching creatures how to speak", "in the dark we make our own", "a frequency unknown",
-    "biolume, biolume", "we bloom inside the gloom",
-  ],
-};
-
 function searchResultToTrack(s: SearchResult): Track {
   return {
     id: s.id, title: s.title, artist: s.artist || 'Unknown',
-    cover: s.cover || '#0a0a1a-#050508', duration: s.duration || 200,
+    cover: s.cover || '', duration: s.duration || 200,
   };
 }
 
@@ -51,7 +15,8 @@ export function useRadioState() {
   const [messages, setMessages] = useState<{ id: string; role: string; text: string }[]>([]);
   const [isPortaling, setIsPortaling] = useState(false);
 
-  const [playlist, setPlaylist] = useState<Track[]>(DEFAULT_PLAYLIST);
+  // 空队列起步：无假专辑/假歌词；扫码点播后 playPlaylist / searchAndPlay 注入真曲
+  const [playlist, setPlaylist] = useState<Track[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(0.5);
@@ -217,10 +182,11 @@ export function useRadioState() {
 
   const tick = useCallback((timestamp: number) => {
     if (!isPlayingRef.current) return;
+    const tracks = playlistRef.current;
+    if (tracks.length === 0) return;
     if (!lastTickRef.current) lastTickRef.current = timestamp;
     const delta = (timestamp - lastTickRef.current) / 1000;
     lastTickRef.current = timestamp;
-    const tracks = playlistRef.current;
     const trackDuration = tracks[trackIndexRef.current]?.duration ?? 1;
     const newProgress = Math.min(progressRef.current + (delta / trackDuration) * 100, 100);
     progressRef.current = newProgress;
@@ -324,7 +290,9 @@ export function useRadioState() {
       else { audio.pause(); setIsPlaying(false); isPlayingRef.current = false; }
       return;
     }
-    const track = playlistRef.current[trackIndexRef.current];
+    const tracks = playlistRef.current;
+    if (tracks.length === 0) return;
+    const track = tracks[trackIndexRef.current];
     const src = track && trackSourcesRef.current[track.id];
     if (src) {
       resumePulseCtx();
@@ -341,13 +309,14 @@ export function useRadioState() {
 
   // Keep playNextRef in sync so audio.onended always calls latest
   const playNext = useCallback(() => {
+    const tracks = playlistRef.current;
+    if (tracks.length === 0) return;
     const now = Date.now();
     if (now - lastAdvanceRef.current < 600) return;
     lastAdvanceRef.current = now;
 
     cancelAnimationFrame(rafRef.current);
     loadGenRef.current += 1;
-    const tracks = playlistRef.current;
     const nextIndex = (trackIndexRef.current + 1) % tracks.length;
     trackIndexRef.current = nextIndex;
     setCurrentTrackIndex(nextIndex);
@@ -366,14 +335,15 @@ export function useRadioState() {
       lastTickRef.current = 0;
       if (isPlayingRef.current) rafRef.current = requestAnimationFrame(tick);
     }
-  }, [tick, trackSources, loadAndPlayTrack]);
+  }, [tick, loadAndPlayTrack]);
   useEffect(() => { playNextRef.current = playNext; }, [playNext]);
 
   const playPrev = useCallback(() => {
+    const tracks = playlistRef.current;
+    if (tracks.length === 0) return;
     lastAdvanceRef.current = Date.now();
     cancelAnimationFrame(rafRef.current);
     loadGenRef.current += 1;
-    const tracks = playlistRef.current;
     const prevIndex = (trackIndexRef.current - 1 + tracks.length) % tracks.length;
     trackIndexRef.current = prevIndex;
     setCurrentTrackIndex(prevIndex);
@@ -469,7 +439,7 @@ export function useRadioState() {
     const idx = Math.max(0, Math.min(startIndex, tracks.length - 1));
     const queue: Track[] = tracks.map(t => ({
       id: t.id, title: t.title, artist: t.artist || 'Unknown',
-      cover: t.cover || '#0a0a1a-#050508', duration: t.duration || 200,
+      cover: t.cover || '', duration: t.duration || 200,
     }));
     const sources: Record<string, string> = {};
     tracks.forEach(t => { sources[t.id] = t.source || 'netease'; });
@@ -498,8 +468,9 @@ export function useRadioState() {
   }, [loadAndPlayTrack]);
 
   const requestSong = useCallback((query: string) => {
-    const lower = query.toLowerCase();
     const tracks = playlistRef.current;
+    if (tracks.length === 0) return null;
+    const lower = query.toLowerCase();
     let idx = tracks.findIndex(t =>
       t.title.toLowerCase().includes(lower) || t.artist.toLowerCase().includes(lower)
     );
@@ -533,23 +504,9 @@ export function useRadioState() {
   const currentTime = hasRealAudio ? audio!.currentTime : (progress / 100) * duration;
   const displayDuration = hasRealAudio ? audio!.duration : (realDuration || duration);
 
-  // ===== Lyrics =====
-  const trackId = currentTrack?.id ?? '';
-  let trackLyrics: string[];
-  let lyricIndex: number;
-
-  if (lyricLines.length > 0) {
-    trackLyrics = lyricLines.map(l => l.text);
-    lyricIndex = findLyricIndex(lyricLines, currentTime);
-  } else if (DEFAULT_LYRICS[trackId]) {
-    trackLyrics = DEFAULT_LYRICS[trackId];
-    lyricIndex = trackLyrics.length > 0
-      ? Math.min(Math.floor((progress / 100) * trackLyrics.length), trackLyrics.length - 1)
-      : -1;
-  } else {
-    trackLyrics = [];
-    lyricIndex = -1;
-  }
+  // ===== Lyrics（仅真歌词；不再塞 demo 假词）=====
+  const trackLyrics = lyricLines.length > 0 ? lyricLines.map(l => l.text) : [];
+  const lyricIndex = lyricLines.length > 0 ? findLyricIndex(lyricLines, currentTime) : -1;
 
   return {
     isPlaying, messages, isPortaling,

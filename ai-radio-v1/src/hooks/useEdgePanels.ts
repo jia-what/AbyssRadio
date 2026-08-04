@@ -23,14 +23,15 @@ export interface EdgePanelState {
 }
 
 /**
- * Edge panels: bottom player defaults visible; AI / playlist open on edge hover
- * (left/right zones), pin keeps them open, unpin restores hover behavior.
+ * Edge panels: AI / playlist open on edge hover.
+ * Bottom player stays off until setBottomEnabled(true) after a real track starts.
  */
 export function useEdgePanels() {
-  const [panels, setPanels] = useState<EdgePanelState>({ left: false, right: false, bottom: true });
+  const [panels, setPanels] = useState<EdgePanelState>({ left: false, right: false, bottom: false });
   const timers = useRef<Partial<Record<PanelZone, ReturnType<typeof setTimeout>>>>({});
-  const pinned = useRef<Record<PanelZone, boolean>>({ left: false, right: false, bottom: true });
-  const visibleRef = useRef<EdgePanelState>({ left: false, right: false, bottom: true });
+  const pinned = useRef<Record<PanelZone, boolean>>({ left: false, right: false, bottom: false });
+  const visibleRef = useRef<EdgePanelState>({ left: false, right: false, bottom: false });
+  const bottomEnabledRef = useRef(false);
 
   const setVisible = useCallback((zone: PanelZone, value: boolean) => {
     visibleRef.current[zone] = value;
@@ -38,6 +39,7 @@ export function useEdgePanels() {
   }, []);
 
   const show = useCallback((zone: PanelZone) => {
+    if (zone === 'bottom' && !bottomEnabledRef.current) return;
     const t = timers.current[zone];
     if (t) {
       clearTimeout(t);
@@ -62,6 +64,7 @@ export function useEdgePanels() {
   }, [setVisible]);
 
   const pin = useCallback((zone: PanelZone) => {
+    if (zone === 'bottom' && !bottomEnabledRef.current) return;
     pinned.current[zone] = true;
     show(zone);
   }, [show]);
@@ -71,7 +74,24 @@ export function useEdgePanels() {
     scheduleHide(zone);
   }, [scheduleHide]);
 
+  const setBottomEnabled = useCallback((enabled: boolean) => {
+    bottomEnabledRef.current = enabled;
+    if (!enabled) {
+      pinned.current.bottom = false;
+      const t = timers.current.bottom;
+      if (t) {
+        clearTimeout(t);
+        timers.current.bottom = undefined;
+      }
+      setVisible('bottom', false);
+      return;
+    }
+    pinned.current.bottom = true;
+    show('bottom');
+  }, [setVisible, show]);
+
   const toggle = useCallback((zone: PanelZone) => {
+    if (zone === 'bottom' && !bottomEnabledRef.current) return;
     if (visibleRef.current[zone] && pinned.current[zone]) {
       unpin(zone);
       if (zone === 'left' || zone === 'bottom') setVisible(zone, false);
@@ -85,11 +105,13 @@ export function useEdgePanels() {
     const onMove = (e: MouseEvent) => {
       const w = window.innerWidth;
       const h = window.innerHeight;
-      // Bottom: show on bottom edge hover
-      if (e.clientY > h - BOTTOM_EDGE) {
-        show('bottom');
-      } else if (!pinned.current.bottom) {
-        scheduleHide('bottom');
+      // Bottom: only when playback UI is enabled
+      if (bottomEnabledRef.current) {
+        if (e.clientY > h - BOTTOM_EDGE) {
+          show('bottom');
+        } else if (!pinned.current.bottom) {
+          scheduleHide('bottom');
+        }
       }
       // Left: AI panel on left edge hover (not when pinned; skip near bottom bar)
       if (!pinned.current.left) {
@@ -112,5 +134,5 @@ export function useEdgePanels() {
     };
   }, [show, scheduleHide]);
 
-  return { panels, pin, unpin, toggle };
+  return { panels, pin, unpin, toggle, setBottomEnabled };
 }

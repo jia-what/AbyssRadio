@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { motion, useMotionValue, useAnimationFrame, useTransform } from 'motion/react';
 import './ShinyText.css';
 
@@ -20,8 +20,16 @@ export interface ShinyTextProps {
   pauseOnHover?: boolean;
   direction?: 'left' | 'right';
   delay?: number;
-  /** 渐变停靠点 [底, 高光起点, 高光峰值, 高光终点, 顶] (0~1)。默认 [0.35, 0.5, 0.65] 即 React Bits 原版; 收紧可让高光带更窄更明显 */
+  /** 渐变停靠点 [底, 高光峰值, 顶] (0~1) */
   stops?: [number, number, number];
+  /**
+   * 适配背景的多色流光。有值时覆盖 color/shineColor 双色模式。
+   * base = 常态字色；highlights = 扫过带上的色阶（建议贴合场景主色）
+   */
+  gradient?: {
+    base: string;
+    highlights: string[];
+  };
 }
 
 const ShinyText = ({
@@ -37,6 +45,7 @@ const ShinyText = ({
   direction = 'left',
   delay = 0,
   stops = [0.35, 0.5, 0.65],
+  gradient,
 }: ShinyTextProps) => {
   const [isPaused, setIsPaused] = useState(false);
   const progress = useMotionValue(0);
@@ -100,7 +109,6 @@ const ShinyText = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [direction]);
 
-  // Transform: p=0 -> 150% (shine off right), p=100 -> -50% (shine off left)
   const backgroundPosition = useTransform(progress, (p) => `${150 - p * 2}% center`);
 
   const handleMouseEnter = useCallback(() => {
@@ -112,13 +120,30 @@ const ShinyText = ({
   }, [pauseOnHover]);
 
   const [s0, s1, s2] = stops;
-  const gradientStyle = {
-    backgroundImage: `linear-gradient(${spread}deg, ${color} 0%, ${color} ${s0 * 100}%, ${shineColor} ${s1 * 100}%, ${color} ${s2 * 100}%, ${color} 100%)`,
-    backgroundSize: '200% auto',
-    WebkitBackgroundClip: 'text',
-    backgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  };
+
+  const gradientStyle = useMemo(() => {
+    let backgroundImage: string;
+    if (gradient && gradient.highlights.length > 0) {
+      const { base, highlights } = gradient;
+      const n = highlights.length;
+      const band = highlights
+        .map((c, i) => {
+          const t = n === 1 ? s1 : s0 + (s2 - s0) * (i / (n - 1));
+          return `${c} ${t * 100}%`;
+        })
+        .join(', ');
+      backgroundImage = `linear-gradient(${spread}deg, ${base} 0%, ${base} ${s0 * 100}%, ${band}, ${base} ${s2 * 100}%, ${base} 100%)`;
+    } else {
+      backgroundImage = `linear-gradient(${spread}deg, ${color} 0%, ${color} ${s0 * 100}%, ${shineColor} ${s1 * 100}%, ${color} ${s2 * 100}%, ${color} 100%)`;
+    }
+    return {
+      backgroundImage,
+      backgroundSize: '200% auto',
+      WebkitBackgroundClip: 'text' as const,
+      backgroundClip: 'text' as const,
+      WebkitTextFillColor: 'transparent',
+    };
+  }, [gradient, color, shineColor, spread, s0, s1, s2]);
 
   return (
     <motion.span
