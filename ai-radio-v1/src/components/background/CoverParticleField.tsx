@@ -225,10 +225,6 @@ export default function CoverParticleField({
     const uDepth = gl.getUniformLocation(program, 'uDepth');
     const uPixel = gl.getUniformLocation(program, 'uPixel');
     const uPointScale = gl.getUniformLocation(program, 'uPointScale');
-    const uMouseActive = gl.getUniformLocation(program, 'uMouseActive');
-    const uMouseWorld = gl.getUniformLocation(program, 'uMouseWorld');
-    const uMouseRadius = gl.getUniformLocation(program, 'uMouseRadius');
-    const uMouseStrength = gl.getUniformLocation(program, 'uMouseStrength');
     const uAlpha = gl.getUniformLocation(program, 'uAlpha');
     const uCoverTex = gl.getUniformLocation(program, 'uCoverTex');
     const uPrevCoverTex = gl.getUniformLocation(program, 'uPrevCoverTex');
@@ -346,25 +342,6 @@ export default function CoverParticleField({
     window.addEventListener('resize', resize);
     syncFocus();
 
-    // ——— Mouse bulge interaction (DotField-style) ———
-    // Store raw screen px; each frame we ray-cast onto the cover plane (z=0)
-    // so the bulge only reacts when the cursor actually hovers the cover.
-    const mouseScreen = { x: -9999, y: -9999 };
-    const mouseActive = { v: 0 };
-    let mouseLastMove = 0;
-    const onMouseMove = (e: MouseEvent) => {
-      mouseScreen.x = e.clientX;
-      mouseScreen.y = e.clientY;
-      mouseActive.v = 1;
-      mouseLastMove = performance.now();
-    };
-    const onMouseLeave = () => {
-      // Fade out the bulge when pointer leaves the window (no abrupt pop)
-      mouseActive.v = 0;
-    };
-    window.addEventListener('mousemove', onMouseMove, { passive: true });
-    document.addEventListener('mouseleave', onMouseLeave);
-
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0, 0, 0, 0);
@@ -413,52 +390,6 @@ export default function CoverParticleField({
       gl.uniform1f(uPixel, dpr);
       gl.uniform1f(uPointScale, 1.45);
       gl.uniform1f(uAlpha, 0.94);
-
-      // Mouse bulge: fade active flag if pointer hasn't moved in 1.5s
-      if (mouseActive.v > 0 && performance.now() - mouseLastMove > 1500) {
-        mouseActive.v = 0;
-      }
-      // Ray-cast pointer onto cover plane (world z=0):
-      //   dir = normalize(ndc→world) from camera eye; t = -eye.z / dir.z
-      let mouseWorldX = 0, mouseWorldY = 0, mouseOnCover = mouseActive.v > 0.5;
-      if (mouseOnCover && width > 1 && height > 1) {
-        const ndcX = (mouseScreen.x / width) * 2 - 1;
-        const ndcY = 1 - (mouseScreen.y / height) * 2;
-        const tanHalf = Math.tan((fovSmooth * Math.PI) / 360);
-        // view matrix columns = camera basis (right, up, back) in world space
-        const rx = view[0], ry = view[1], rz = view[2];
-        const ux = view[4], uy = view[5], uz = view[6];
-        const bx = view[8], by = view[9], bz = view[10];
-        // NDC ray in view space → world direction (un-normalized, z matters)
-        const dViewX = ndcX * tanHalf * (width / height);
-        const dViewY = ndcY * tanHalf;
-        const dirX = dViewX * rx + dViewY * ux - bx;
-        const dirY = dViewX * ry + dViewY * uy - by;
-        const dirZ = dViewX * rz + dViewY * uz - bz;
-        const eye = cameraRefInternal.current.current
-          ? orbitEye(cameraRefInternal.current.current)
-          : [0, 0, 6.6];
-        if (Math.abs(dirZ) > 1e-4) {
-          const t = -eye[2] / dirZ;
-          if (t > 0) {
-            mouseWorldX = eye[0] + t * dirX;
-            mouseWorldY = eye[1] + t * dirY;
-            // Keep bulge inside the cover plane (~4.8 world units wide)
-            const half = 2.4;
-            if (Math.abs(mouseWorldX) > half + 0.4 || Math.abs(mouseWorldY) > half + 0.4) {
-              mouseOnCover = false;
-            }
-          } else {
-            mouseOnCover = false;
-          }
-        } else {
-          mouseOnCover = false;
-        }
-      }
-      gl.uniform1f(uMouseActive, mouseOnCover ? 1 : 0);
-      gl.uniform2f(uMouseWorld, mouseWorldX, mouseWorldY);
-      gl.uniform1f(uMouseRadius, 1.1);
-      gl.uniform1f(uMouseStrength, 0.42);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, coverTex);
@@ -568,8 +499,6 @@ export default function CoverParticleField({
       disposed = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
-      window.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseleave', onMouseLeave);
       gl.deleteProgram(program);
       gl.deleteBuffer(posBuf);
       gl.deleteBuffer(uvBuf);

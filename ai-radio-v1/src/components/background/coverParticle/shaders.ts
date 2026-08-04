@@ -23,10 +23,6 @@ uniform float uIntensity;
 uniform float uDepth;
 uniform float uPixel;
 uniform float uPointScale;
-uniform float uMouseActive;
-uniform vec2 uMouseWorld;
-uniform float uMouseRadius;
-uniform float uMouseStrength;
 
 uniform sampler2D uCoverTex;
 uniform sampler2D uPrevCoverTex;
@@ -130,24 +126,6 @@ void main() {
   float kick = clamp(uKickPulse, 0.0, 1.0);
   vec2 centered = aUv - 0.5;
   pos.xy += centered * kick * (0.022 + kick * 0.018);
-
-  // ——— Mouse bulge (DotField-style): particles pushed away from cursor ———
-  // uMouseWorld = ray-cast intersection of the pointer with the cover plane
-  // (world z=0), so the bulge ONLY reacts when the cursor actually hovers the
-  // cover. Distance is world-space (cover plane is ~4.8 units wide), matching
-  // the cover's real size — orbit/zoom keeps the interaction glued to the art.
-  if (uMouseActive > 0.5) {
-    vec2 toMouse = pos.xy - uMouseWorld;
-    float md = length(toMouse);
-    float inf = 1.0 - smoothstep(uMouseRadius * 0.35, uMouseRadius, md);
-    if (inf > 0.001) {
-      vec2 dir = md > 0.001 ? toMouse / md : vec2(0.0, 1.0);
-      float push = inf * inf * uMouseStrength;
-      pos.xy += dir * push;
-      pos.z += inf * uMouseStrength * 0.22;
-    }
-  }
-
   pos.z = midDisp + trebleJ + bassBreath + depthZ + kick * (0.014 + kick * 0.012) * K;
 
   float edgeBoost = edgeVal * (1.0 - smoothstep(0.02, 0.12, dot(max(vColor, vec3(0.0)), vec3(0.299, 0.587, 0.114))));
