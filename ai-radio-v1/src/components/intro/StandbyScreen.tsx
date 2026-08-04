@@ -1,18 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import MagicRings from './MagicRings';
+import SpecularButton from '../ui/SpecularButton';
 
 /**
- * StandbyScreen — 动态待机画面 (开机动画结束后衔接)
+ * StandbyScreen — 动态待机画面 (默认入口)
  *
- * 结构 (借鉴 Mineradio splash 交互模式, 视觉自研):
+ * 结构:
  *   MagicRings 冷青声呐环循环动画 (全屏背景)
  *   + 中心字标 ABYSS RADIO (渐入)
  *   + 副标 DEEP SIGNAL
- *   + 「点击进入」按钮 → 点击 → 整体淡出 → 主界面
+ *   + SpecularButton「点击进入」按钮 (WebGL 高光扫过) → 点击 → 整体淡出 → 主界面
  *
- * 点击区域: 整屏可点 + 按钮视觉引导 (Mineradio 也是"点击空白处继续")。
- * 待机期间鼠标跟随/悬停由 MagicRings 内部处理, 增加"活物感"。
+ * 入口唯一: 只有按钮可进入 (2026-08-04 老板拍板: 去掉整屏点击/任意处继续,
+ * 避免"整屏可点 + 按钮"双入口冲突)。
  */
 
 export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
@@ -25,23 +26,12 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
     setTimeout(onEnter, 620);
   };
 
-  // 键盘回车也能进 (桌面应用惯例)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEnter(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exiting]);
-
   return (
     <motion.div
-      className="fixed inset-0 z-[100] bg-[#050508] overflow-hidden select-none cursor-pointer"
+      className="fixed inset-0 z-[100] bg-[#050508] overflow-hidden select-none"
       initial={{ opacity: 1 }}
       animate={{ opacity: exiting ? 0 : 1 }}
       transition={{ duration: 0.6, ease: 'easeInOut' }}
-      onClick={handleEnter}
     >
       {/* 循环声呐环背景 */}
       <MagicRings
@@ -91,30 +81,33 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
         </motion.div>
       </div>
 
-      {/* 点击进入按钮 */}
-      <div className="absolute inset-x-0 bottom-[14vh] flex justify-center pointer-events-none">
-        <motion.button
-          className="pointer-events-auto px-9 py-3 rounded-full text-white/85 text-[clamp(12px,1.4vw,15px)] tracking-[0.35em] pl-[calc(2.25rem+0.35em)] border border-white/20 bg-white/[0.04] backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/40 transition-colors duration-300"
+      {/* 点击进入按钮 (唯一入口) */}
+      <div className="absolute inset-x-0 bottom-[14vh] flex justify-center">
+        <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.0, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-          whileHover={{ scale: 1.04 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={(e) => { e.stopPropagation(); handleEnter(); }}
         >
-          点击进入
-        </motion.button>
-      </div>
-
-      {/* 底部提示 */}
-      <div className="absolute inset-x-0 bottom-[7vh] flex justify-center">
-        <motion.div
-          className="text-white/25 text-[10px] tracking-[0.4em]"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 1, 0.4] }}
-          transition={{ delay: 1.5, duration: 1.2 }}
-        >
-          点击任意处继续
+          <SpecularButton
+            size="lg"
+            radius={999}
+            tint="#ffffff"
+            tintOpacity={0.05}
+            blur={8}
+            textColor="rgba(255,255,255,0.9)"
+            lineColor="#8fd0ff"
+            baseColor="#2a4a6a"
+            intensity={1.2}
+            shineSize={12}
+            shineFade={45}
+            thickness={1.4}
+            speed={0.4}
+            followMouse
+            proximity={300}
+            onClick={handleEnter}
+          >
+            点击进入
+          </SpecularButton>
         </motion.div>
       </div>
     </motion.div>
