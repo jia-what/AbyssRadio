@@ -44,12 +44,6 @@ const DEFAULT_STEPS: GuideStep[] = [
     body: '贴右缘唤出歌单面板,扫码登录网易云/酷狗后就能同步自己的歌单,点播整张专辑。',
   },
   {
-    selector: '.bottom-bar, [class*="bottom"]',
-    kicker: '播放控制台',
-    title: '底部: 播放器',
-    body: '播放后,进度、音量、歌词模式、切歌都集中在底部。悬停音量条还有弹性手感。',
-  },
-  {
     kicker: '开始聆听',
     title: '现在就试试',
     body: '搜索或点播一首歌:封面粒子会跟着音乐律动,歌词悬浮在 3D 空间里。',
@@ -87,12 +81,11 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
   const locate = useCallback(() => {
     const s = steps[Math.min(stepIndex, steps.length - 1)];
     if (!s?.selector) {
-      // 无 selector: 中心舞台
-      const w = Math.min(640, Math.max(280, window.innerWidth - 120));
-      const h = Math.min(340, Math.max(180, window.innerHeight * 0.34));
-      const l = window.innerWidth / 2 - w / 2;
-      const t = Math.max(90, window.innerHeight * 0.3 - h / 2);
-      setRect({ left: l, top: t, width: w, height: h, right: l + w, bottom: t + h } as DOMRect);
+      // 无 selector: 全屏框选 (欢迎/结尾步骤) — 不裁内容, 遮罩均匀压暗
+      setRect({
+        left: 0, top: 0, width: window.innerWidth, height: window.innerHeight,
+        right: window.innerWidth, bottom: window.innerHeight,
+      } as DOMRect);
       setCardSide('below');
       return;
     }
@@ -174,12 +167,17 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
     [next],
   );
 
+  const isFullscreenStep = !step?.selector;
   const isEdgeStep = !!step?.selector && (step.selector.includes('aria-label="打开 AI"') || step.selector.includes('aria-label="打开歌单"'));
   const cardW = Math.min(340, window.innerWidth - 32);
   let cardX: number;
   let cardY: number;
   if (rect) {
-    if (isEdgeStep) {
+    if (isFullscreenStep) {
+      // 全屏步骤: 卡片居中偏下
+      cardX = Math.max(16, window.innerWidth / 2 - cardW / 2);
+      cardY = Math.max(16, window.innerHeight / 2 + 40);
+    } else if (isEdgeStep) {
       // 边缘热区步骤: 卡片放高亮环右侧, 垂直与环中心对齐, 避免重叠
       cardX = Math.min(window.innerWidth - cardW - 16, rect.right + 18);
       cardY = Math.max(16, rect.top + rect.height / 2 - 120);
@@ -204,13 +202,13 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
           transition={{ duration: 0.25 }}
           onClick={handleSurfaceClick}
         >
-          {/* 遮罩: 目标处挖洞 */}
+          {/* 遮罩: 目标处挖洞; 全屏步骤均匀压暗 */}
           <div
             className="absolute inset-0"
             style={{
-              background: rect
+              background: rect && !isFullscreenStep
                 ? `radial-gradient(circle at ${rect.left + rect.width / 2}px ${rect.top + rect.height / 2}px, transparent 0px, transparent ${Math.min(rect.width, rect.height) / 2 - 30}px, rgba(2,4,10,0.62) ${Math.max(rect.width, rect.height) / 2 + 40}px, rgba(2,4,10,0.82) 100%)`
-                : 'rgba(2,4,10,0.75)',
+                : 'rgba(2,4,10,0.42)',
             }}
           />
 
@@ -223,12 +221,13 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
                 top: rect.top,
                 width: rect.width,
                 height: rect.height,
-                borderRadius: isEdgeStep ? '0 20px 20px 0' : 18,
-                boxShadow:
-                  '0 0 0 1.5px rgba(120,200,255,0.55), 0 0 26px rgba(80,180,255,0.35), 0 0 90px rgba(60,140,255,0.18)',
+                borderRadius: isFullscreenStep ? 0 : isEdgeStep ? '0 20px 20px 0' : 18,
+                boxShadow: isFullscreenStep
+                  ? 'inset 0 0 0 1.5px rgba(120,200,255,0.35), inset 0 0 60px rgba(80,180,255,0.10)'
+                  : '0 0 0 1.5px rgba(120,200,255,0.55), 0 0 26px rgba(80,180,255,0.35), 0 0 90px rgba(60,140,255,0.18)',
               }}
-              initial={{ opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
             />
           )}
