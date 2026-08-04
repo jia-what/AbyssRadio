@@ -226,7 +226,7 @@ export default function CoverParticleField({
     const uPixel = gl.getUniformLocation(program, 'uPixel');
     const uPointScale = gl.getUniformLocation(program, 'uPointScale');
     const uMouseActive = gl.getUniformLocation(program, 'uMouseActive');
-    const uMouse = gl.getUniformLocation(program, 'uMouse');
+    const uMouseWorld = gl.getUniformLocation(program, 'uMouseWorld');
     const uMouseRadius = gl.getUniformLocation(program, 'uMouseRadius');
     const uMouseStrength = gl.getUniformLocation(program, 'uMouseStrength');
     const uAlpha = gl.getUniformLocation(program, 'uAlpha');
@@ -347,13 +347,14 @@ export default function CoverParticleField({
     syncFocus();
 
     // ——— Mouse bulge interaction (DotField-style) ———
-    // Normalized cursor in cover-plane UV space (y flipped: UV v=0 at bottom).
-    const mouseUV = { x: -9, y: -9 };
+    // Store raw screen px; each frame we ray-cast onto the cover plane (z=0)
+    // so the bulge only reacts when the cursor actually hovers the cover.
+    const mouseScreen = { x: -9999, y: -9999 };
     const mouseActive = { v: 0 };
     let mouseLastMove = 0;
     const onMouseMove = (e: MouseEvent) => {
-      mouseUV.x = e.clientX / Math.max(1, window.innerWidth);
-      mouseUV.y = 1 - e.clientY / Math.max(1, window.innerHeight);
+      mouseScreen.x = e.clientX;
+      mouseScreen.y = e.clientY;
       mouseActive.v = 1;
       mouseLastMove = performance.now();
     };
@@ -417,10 +418,47 @@ export default function CoverParticleField({
       if (mouseActive.v > 0 && performance.now() - mouseLastMove > 1500) {
         mouseActive.v = 0;
       }
-      gl.uniform1f(uMouseActive, mouseActive.v);
-      gl.uniform2f(uMouse, mouseUV.x, mouseUV.y);
-      gl.uniform1f(uMouseRadius, 0.2);
-      gl.uniform1f(uMouseStrength, 0.15);
+      // Ray-cast pointer onto cover plane (world z=0):
+      //   dir = normalize(ndc→world) from camera eye; t = -eye.z / dir.z
+      let mouseWorldX = 0, mouseWorldY = 0, mouseOnCover = mouseActive.v > 0.5;
+      if (mouseOnCover && width > 1 && height > 1) {
+        const ndcX = (mouseScreen.x / width) * 2 - 1;
+        const ndcY = 1 - (mouseScreen.y / height) * 2;
+        const tanHalf = Math.tan((fovSmooth * Math.PI) / 360);
+        // view matrix columns = camera basis (right, up, back) in world space
+        const rx = view[0], ry = view[1], rz = view[2];
+        const ux = view[4], uy = view[5], uz = view[6];
+        const bx = view[8], by = view[9], bz = view[10];
+        // NDC ray in view space → world direction (un-normalized, z matters)
+        const dViewX = ndcX * tanHalf * (width / height);
+        const dViewY = ndcY * tanHalf;
+        const dirX = dViewX * rx + dViewY * ux - bx;
+        const dirY = dViewX * ry + dViewY * uy - by;
+        const dirZ = dViewX * rz + dViewY * uz - bz;
+        const eye = cameraRefInternal.current.current
+          ? orbitEye(cameraRefInternal.current.current)
+          : [0, 0, 6.6];
+        if (Math.abs(dirZ) > 1e-4) {
+          const t = -eye[2] / dirZ;
+          if (t > 0) {
+            mouseWorldX = eye[0] + t * dirX;
+            mouseWorldY = eye[1] + t * dirY;
+            // Keep bulge inside the cover plane (~4.8 world units wide)
+            const half = 2.4;
+            if (Math.abs(mouseWorldX) > half + 0.4 || Math.abs(mouseWorldY) > half + 0.4) {
+              mouseOnCover = false;
+            }
+          } else {
+            mouseOnCover = false;
+          }
+        } else {
+          mouseOnCover = false;
+        }
+      }
+      gl.uniform1f(uMouseActive, mouseOnCover ? 1 : 0);
+      gl.uniform2f(uMouseWorld, mouseWorldX, mouseWorldY);
+      gl.uniform1f(uMouseRadius, 1.1);
+      gl.uniform1f(uMouseStrength, 0.42);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, coverTex);
