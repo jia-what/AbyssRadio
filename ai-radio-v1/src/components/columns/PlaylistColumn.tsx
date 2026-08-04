@@ -8,7 +8,8 @@ import {
   type Platform, type Playlist, type PlaylistTrack, type BindResult, type QrPollCode,
 } from '../../services/playlistApi';
 import CoverThumb from '../ui/CoverThumb';
-import SpatialStack, { type StackCardState } from './SpatialStack';
+import type { StackCardState } from './SpatialStack';
+import OptionWheelStack from './OptionWheelStack';
 
 interface Props {
   visible: boolean;
@@ -507,14 +508,19 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                           ) : playlists.length === 0 ? (
                             <div className="absolute inset-0 flex items-center justify-center text-white/20 text-xs">暂无歌单</div>
                           ) : (
-                            <SpatialStack
+                            <OptionWheelStack
                               items={playlists}
                               activeIndex={plActive}
                               onActiveChange={setPlActive}
                               renderCard={renderPlaylistCard}
-                              gap={88}
-                              wheelThreshold={55}
-                              wheelCooldown={110}
+                              side="right"
+                              gap={112}
+                              tilt={7}
+                              curve={1}
+                              blur={2.2}
+                              fade={0.28}
+                              minOpacity={0.04}
+                              smoothing={220}
                             />
                           )}
                         </motion.div>
@@ -537,14 +543,19 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                           ) : tracks.length === 0 ? (
                             <div className="absolute inset-0 flex items-center justify-center text-white/20 text-xs">暂无歌曲</div>
                           ) : (
-                            <SpatialStack
+                            <OptionWheelStack
                               items={tracks}
                               activeIndex={trkActive}
                               onActiveChange={setTrkActive}
                               renderCard={renderTrackCard}
-                              gap={58}
-                              wheelThreshold={48}
-                              wheelCooldown={90}
+                              side="right"
+                              gap={76}
+                              tilt={7}
+                              curve={1}
+                              blur={2}
+                              fade={0.26}
+                              minOpacity={0.04}
+                              smoothing={200}
                             />
                           )}
                         </motion.div>

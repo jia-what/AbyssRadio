@@ -1,0 +1,29 @@
+/* OptionWheelStack — OptionWheel 布局引擎 (弧形滚轮) 的卡片版样式 */
+
+.ow-stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  outline: none;
+}
+
+.ow-stack--dragging {
+  cursor: grabbing;
+}
+
+/* 每个卡片绝对居中, 由 rAF 循环通过 transform/opacity/filter 沿弧线摆放 */
+.ow-stack__item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  cursor: pointer;
+  will-change: transform, opacity, filter;
+}
