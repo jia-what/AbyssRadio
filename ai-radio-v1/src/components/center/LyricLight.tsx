@@ -40,7 +40,7 @@ export default function LyricLight({
         best = tl.text;
       }
     }
-    if (bestDist < 1.5) activeTranslation = best;
+    if (bestDist < 2.5) activeTranslation = best;
   }
   const hasAnyTranslation = translationLines.length > 0;
 

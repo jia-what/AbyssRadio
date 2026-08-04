@@ -216,12 +216,21 @@ app.get('/api/music/lyric', async function(req, res) {
   const keyword = req.query.keyword || '';
   if (!id) return res.status(400).json({ error: 'missing query param id' });
   try {
-    const session = key ? getSession(key) : null;
-    const kugouCookie = session && session.platform === 'kugou'
-      ? session.cookie
-      : (process.env.KUGOU_COOKIE || undefined);
-    // keyword = "artist\t title" (defect 8) — used for Netease translation borrow
-    const lyric = await getLyric(id, source, kugouCookie, keyword);
+    // Same session refresh as url-smart — QR login cookie must reach lyric/tlyric too.
+    let platformCookie;
+    if (key) {
+      const fresh = await ensureFreshSession(key);
+      const session = fresh?.session;
+      if (session?.platform === 'kugou') platformCookie = fresh.cookie;
+      else if (session?.platform === 'netease') platformCookie = fresh.cookie;
+    }
+    if (!platformCookie) {
+      platformCookie = source === 'kugou'
+        ? (process.env.KUGOU_COOKIE || undefined)
+        : (process.env.NETEASE_COOKIE || undefined);
+    }
+    // keyword = "artist\ttitle" (defect 8) — used for Netease translation borrow
+    const lyric = await getLyric(id, source, platformCookie, keyword);
     if (typeof lyric === 'string') res.json({ lyric, krc: '', tlyric: '' });
     else res.json({ lyric: lyric.lrc || '', krc: lyric.krc || '', tlyric: lyric.tlyric || '' });
   } catch (e) {

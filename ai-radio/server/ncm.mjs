@@ -253,33 +253,40 @@ async function getUrlRaw(songId, source, cookieOverride) {
   return await meting.url(id);
 }
 
-export async function getLyric(songId, source, kugouCookie, searchKeyword) {
+export async function getLyric(songId, source, platformCookie, searchKeyword) {
   if (!source) source = 'netease';
   var id = String(songId);
   var kugou = null;
   if (source === 'kugou') {
     const { getKugouLyric } = await import('./kugou.mjs');
-    kugou = await getKugouLyric(id, kugouCookie);
-    // Keep hash part only for fallback; remember keyword for Netease translation lookup
+    kugou = await getKugouLyric(id, platformCookie);
+    // Keep hash only; playlist ids are hash|mixsongid|albumId — never treat
+    // the numeric mixsongid as a translation search keyword.
     const parts = id.split('|');
     id = parts[0];
-    searchKeyword = searchKeyword || decodeURIComponent(parts[1] || '');
-    if (kugou.lrc) {
+    if (!searchKeyword) {
+      const maybe = decodeURIComponent(parts[1] || '');
+      if (maybe && !/^\d+$/.test(maybe)) searchKeyword = maybe;
+    }
+    // KRC-only tracks still need Netease tlyric borrow (new playlist adds often
+    // land here after QR login — play works, translation used to stay empty).
+    if (kugou.lrc || kugou.krc) {
       const tlyric = await neteaseTranslationFallback(searchKeyword, kugou.tlyric);
-      return { lrc: kugou.lrc, krc: kugou.krc || '', tlyric };
+      return { lrc: kugou.lrc || '', krc: kugou.krc || '', tlyric };
     }
   }
   var meting = makeMeting(source);
-  if (kugouCookie && source === 'kugou') meting.cookie(kugouCookie);
+  if (platformCookie && (source === 'kugou' || source === 'netease')) {
+    meting.cookie(platformCookie);
+  }
   var raw = await meting.lyric(id);
   // raw is a JSON string from Meting — parse and extract the lyric text
   try {
     var parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     var lrc = parsed.lrc || parsed;
     var tlyric = (parsed.tlyric && parsed.tlyric.lyric) || '';
-    // Defect 8: Netease-source songs with no translation — try a same-name
-    // borrow too (a different release/version may carry tlyric).
-    if (source === 'netease' && !tlyric && searchKeyword) {
+    // Any source with empty tlyric: borrow from another Netease release.
+    if (!tlyric && searchKeyword) {
       tlyric = await neteaseTranslationFallback(searchKeyword, '');
     }
     return { lrc: lrc.lyric || '', krc: '', tlyric };
@@ -294,6 +301,20 @@ export async function getLyric(songId, source, kugouCookie, searchKeyword) {
  *  Bounded: only caches a miss AFTER trying every candidate (defect 8). */
 const neteaseTransCache = new Map();   // keyword -> { tlyric, at }
 const neteaseTransMiss = new Map();   // keyword -> at
+
+/** Strip live/remix/feat clutter so playlist titles still match Netease catalog. */
+function cleanTitleForSearch(title) {
+  return String(title || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/（[^）]*）/g, ' ')
+    .replace(/\[[^\]]*]/g, ' ')
+    .replace(/【[^】]*】/g, ' ')
+    .replace(/\s[-–—]\s*(live|remix|acoustic|cover|version|ver\.?|live\s*version).*$/i, '')
+    .replace(/\s+(feat\.?|ft\.?|with)\s+.+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function neteaseTranslationFallback(keyword, existing) {
   if (existing && existing.trim()) return existing;
   const kw = String(keyword || '').trim();
@@ -302,8 +323,6 @@ async function neteaseTranslationFallback(keyword, existing) {
   if (neteaseTransCache.has(kw)) return neteaseTransCache.get(kw).tlyric;
   if (neteaseTransMiss.has(kw) && now - neteaseTransMiss.get(kw) < 10 * 60 * 1000) return '';
   try {
-    // Split "artist\t title" (or legacy "artist title"): search with the full
-    // string, match against the title part with whole-word semantics.
     const tabIdx = kw.indexOf('\t');
     let titleNeedle, artistNeedle;
     if (tabIdx >= 0) {
@@ -311,37 +330,44 @@ async function neteaseTranslationFallback(keyword, existing) {
       titleNeedle = kw.slice(tabIdx + 1).trim();
     } else {
       const parts = kw.split(/\s+/);
-      // Heuristic for legacy form: last 1..2 tokens are likely the title
       artistNeedle = parts.slice(0, -1).join(' ');
       titleNeedle = parts[parts.length - 1] || '';
     }
-    const norm = (s) => String(s || '').toLowerCase().replace(/[\s（）()\[\]【】\-—_·.。,!！?？:：'"“”‘’]/g, '');
+    titleNeedle = cleanTitleForSearch(titleNeedle) || titleNeedle;
+    const norm = (s) => String(s || '').toLowerCase().replace(/[\s（）()\[\]【】\-—_·.。,!！?？:：'"“”‘’']/g, '');
     const needleT = norm(titleNeedle);
     if (!needleT || needleT.length < 2) return '';
     const needleA = norm(artistNeedle);
 
-    const items = await searchNetease(`${titleNeedle} ${artistNeedle}`.trim(), 8);
-    for (const it of items) {
-      const t = norm(it.title);
-      const a = norm(it.artist);
-      // Whole-title match: exact after normalization, or contiguous containment
-      // of at least 4 chars (CJK) / 4 latin chars — never 2-char fuzzy includes.
-      let titleHit = t === needleT;
-      if (!titleHit && needleT.length >= 4) {
-        titleHit = t.includes(needleT) || needleT.includes(t);
+    // Title-only pass helps when playlist artist metadata is wrong/empty.
+    const queries = [
+      `${titleNeedle} ${artistNeedle}`.trim(),
+      titleNeedle,
+    ].filter((q, i, arr) => q && arr.indexOf(q) === i);
+
+    for (const q of queries) {
+      const items = await searchNetease(q, 8);
+      // Prefer same artist, then others (playlist metadata often drifts).
+      const ranked = items.slice().sort((x, y) => {
+        const ax = !needleA || norm(x.artist).includes(needleA) || needleA.includes(norm(x.artist)) ? 1 : 0;
+        const ay = !needleA || norm(y.artist).includes(needleA) || needleA.includes(norm(y.artist)) ? 1 : 0;
+        return ay - ax;
+      });
+      for (const it of ranked) {
+        const t = norm(it.title);
+        let titleHit = t === needleT;
+        if (!titleHit && needleT.length >= 4) {
+          titleHit = t.includes(needleT) || needleT.includes(t);
+        }
+        if (!titleHit) continue;
+        const raw = await makeMeting('netease').lyric(it.id);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const tl = (parsed?.tlyric?.lyric) || '';
+        if (tl && tl.trim()) {
+          neteaseTransCache.set(kw, { tlyric: tl, at: now });
+          return tl;
+        }
       }
-      if (!titleHit) continue;
-      // Artist bonus: prefer the original artist but don't hard-fail on it —
-      // many Netease entries tag "artist - 歌手" strings.
-      const artistScore = !needleA || a.includes(needleA) || needleA.includes(a) ? 1 : 0;
-      const raw = await makeMeting('netease').lyric(it.id);
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      const tl = (parsed?.tlyric?.lyric) || '';
-      if (tl && tl.trim()) {
-        neteaseTransCache.set(kw, { tlyric: tl, at: now });
-        return tl;
-      }
-      // No translation on this candidate — try the next (defect 8: no early break)
     }
     neteaseTransMiss.set(kw, now);
     return '';

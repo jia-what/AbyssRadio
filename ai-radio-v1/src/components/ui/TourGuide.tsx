@@ -59,6 +59,12 @@ const DEFAULT_STEPS: GuideStep[] = [
 ];
 
 const GUIDE_SEEN_KEY = 'ai-radio-guide-seen';
+/** 左右缘高亮条宽度 / 距屏边 / 与说明卡间距 */
+const EDGE_RING_W = 56;
+const EDGE_INSET = 16;
+const EDGE_GAP = 14;
+/** 边缘步骤高亮条临时高度(随后会与卡片实测高度对齐) */
+const EDGE_RING_H_FALLBACK = 228;
 
 export function guideWasSeen() {
   try {
@@ -114,26 +120,31 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       // 左缘/右缘触发条: 高亮范围沿边缘拉长, 贴合"整条边缘热区"的交互语义
       const isEdgeBar = s.selector.includes('aria-label="打开 AI"') || s.selector.includes('aria-label="打开歌单"');
       const pad = isEdgeBar ? 0 : 10;
-      // 边缘步骤: 框向屏内偏移, 圆角不被视口裁切; 宽度固定 60px, 左右对称距边 14px
-      const edgeInset = 14;
       const isLeftEdge = isEdgeBar && r.left < window.innerWidth / 2;
+      if (isEdgeBar) {
+        // 垂直居中; 若卡片已挂载则直接用实测高度, 避免先 fallback 再 sync 造成伸缩闪一下
+        const cardH = cardRef.current?.getBoundingClientRect().height ?? 0;
+        const h = cardH > 40 ? cardH : EDGE_RING_H_FALLBACK;
+        const top = Math.max(16, Math.min(window.innerHeight - h - 16, window.innerHeight / 2 - h / 2));
+        const left = isLeftEdge ? EDGE_INSET : window.innerWidth - EDGE_INSET - EDGE_RING_W;
+        setRect({
+          left,
+          top,
+          width: EDGE_RING_W,
+          height: h,
+          right: left + EDGE_RING_W,
+          bottom: top + h,
+        } as DOMRect);
+        setCardSide('below');
+        return;
+      }
       const expanded: DOMRect = {
-        left: isEdgeBar
-          ? isLeftEdge
-            ? edgeInset
-            : window.innerWidth - edgeInset - 60
-          : Math.max(8, r.left - pad),
-        top: isEdgeBar ? Math.max(4, r.top - 56) : Math.max(8, r.top - pad),
-        width: isEdgeBar
-          ? 60
-          : Math.min(window.innerWidth - 16, r.width + pad * 2),
-        height: isEdgeBar ? Math.min(window.innerHeight - 8, r.height + 112) : Math.min(window.innerHeight - 16, r.height + pad * 2),
-        right: isEdgeBar
-          ? isLeftEdge
-            ? edgeInset + 60
-            : window.innerWidth - edgeInset
-          : Math.min(window.innerWidth - 8, r.right + pad),
-        bottom: Math.min(window.innerHeight - 4, r.bottom + 56),
+        left: Math.max(8, r.left - pad),
+        top: Math.max(8, r.top - pad),
+        width: Math.min(window.innerWidth - 16, r.width + pad * 2),
+        height: Math.min(window.innerHeight - 16, r.height + pad * 2),
+        right: Math.min(window.innerWidth - 8, r.right + pad),
+        bottom: Math.min(window.innerHeight - 8, r.bottom + pad),
       } as DOMRect;
       setRect(expanded);
       // 卡片放目标下方; 放不下放上方
@@ -159,19 +170,22 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
     if (open) setStepIndex(0);
   }, [open]);
 
-  // 定位目标: 打开/切步时同步定位 (useLayoutEffect 在绘制前执行, 避免高亮环
-  // 从旧位置跳到新位置产生闪烁); 面板动画完成后延迟补一次定位兜底
+  // 定位目标: 打开/切步时同步定位; 边缘步不做延迟 locate (会把高度打回 fallback 造成伸缩)
   useLayoutEffect(() => {
     if (!open) return;
+    const s = steps[Math.min(stepIndex, steps.length - 1)];
+    const edgeStep = !!s?.selector && (s.selector.includes('打开 AI') || s.selector.includes('打开歌单'));
+    // 切步先清掉上一步 rect, 避免一帧沿用全屏框尺寸
+    if (edgeStep) setRect(null);
     locate();
-    const t1 = setTimeout(locate, 200);
+    const t1 = edgeStep ? undefined : window.setTimeout(locate, 200);
     const onResize = () => locate();
     window.addEventListener('resize', onResize);
     return () => {
-      clearTimeout(t1);
+      if (t1) window.clearTimeout(t1);
       window.removeEventListener('resize', onResize);
     };
-  }, [open, locate]);
+  }, [open, locate, stepIndex, steps]);
 
   const next = useCallback(() => {
     if (stepIndex >= steps.length - 1) {
@@ -180,8 +194,6 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       return;
     }
     setStepIndex((i) => i + 1);
-    // 定位交给 useLayoutEffect ([open, locate] 依赖, locate 随 stepIndex 重建),
-    // 这里不能再 rAF/setTimeout 调旧闭包 — 会把环拉回旧步骤位置造成闪烁
   }, [stepIndex, steps.length, onClose]);
 
   const skip = useCallback(() => {
@@ -200,33 +212,60 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
 
   const isFullscreenStep = !step?.selector && step?.zone !== 'bottom';
   const isEdgeStep = !!step?.selector && (step.selector.includes('aria-label="打开 AI"') || step.selector.includes('aria-label="打开歌单"'));
+  const ringIsLeft = !!(rect && rect.left < window.innerWidth / 2);
   const cardW = Math.min(340, window.innerWidth - 32);
   let cardX: number;
   let cardY: number;
   if (rect) {
     if (isFullscreenStep) {
-      // 全屏步骤: 卡片居中偏下
       cardX = Math.max(16, window.innerWidth / 2 - cardW / 2);
       cardY = Math.max(16, window.innerHeight / 2 + 40);
     } else if (step?.zone === 'bottom') {
-      // 底部播放栏步骤: 卡片放高亮框上方
       cardX = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width / 2 - cardW / 2));
       cardY = Math.max(16, rect.top - 210);
     } else if (isEdgeStep) {
-      // 边缘热区步骤: 卡片放环的内侧 (左缘环→卡在右, 右缘环→卡在左), 不遮环
-      const ringIsLeft = rect.left < window.innerWidth / 2;
-      cardX = ringIsLeft
-        ? Math.min(window.innerWidth - cardW - 16, rect.right + 18)
-        : Math.max(16, rect.left - cardW - 18);
-      cardY = Math.max(16, rect.top + rect.height / 2 - 120);
+      const edgeReady = rect.width === EDGE_RING_W;
+      const leftEdge = edgeReady ? ringIsLeft : !!step?.selector?.includes('打开 AI');
+      cardX = leftEdge
+        ? Math.min(window.innerWidth - cardW - 16, (edgeReady ? rect.right : EDGE_INSET + EDGE_RING_W) + EDGE_GAP)
+        : Math.max(16, (edgeReady ? rect.left : window.innerWidth - EDGE_INSET - EDGE_RING_W) - cardW - EDGE_GAP);
+      const h = edgeReady ? rect.height : EDGE_RING_H_FALLBACK;
+      cardY = Math.max(16, Math.min(window.innerHeight - h - 16, window.innerHeight / 2 - h / 2));
     } else {
       cardX = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width / 2 - cardW / 2));
       cardY = cardSide === 'below' ? rect.bottom + 18 : Math.max(16, rect.top - 210);
     }
+  } else if (isEdgeStep) {
+    // rect 清空后的一帧: 先用预估位置, 避免闪到别处
+    const leftEdge = !!step?.selector?.includes('打开 AI');
+    cardX = leftEdge
+      ? EDGE_INSET + EDGE_RING_W + EDGE_GAP
+      : window.innerWidth - EDGE_INSET - EDGE_RING_W - cardW - EDGE_GAP;
+    cardY = Math.max(16, window.innerHeight / 2 - EDGE_RING_H_FALLBACK / 2);
   } else {
     cardX = 16;
     cardY = 80;
   }
+
+  // 边缘步骤: 仅在卡片实测高度与当前 ring 不一致时对齐一次 (不再被延迟 locate 打回)
+  useLayoutEffect(() => {
+    if (!open || !isEdgeStep || !cardRef.current || !rect || rect.width !== EDGE_RING_W) return;
+    const card = cardRef.current;
+    const cr = card.getBoundingClientRect();
+    if (cr.height < 40) return;
+    const nextH = cr.height;
+    const nextTop = Math.max(16, Math.min(window.innerHeight - nextH - 16, window.innerHeight / 2 - nextH / 2));
+    if (Math.abs(rect.top - nextTop) < 0.5 && Math.abs(rect.height - nextH) < 0.5) return;
+    setRect((prev) => {
+      if (!prev || prev.width !== EDGE_RING_W) return prev;
+      return {
+        ...prev,
+        top: nextTop,
+        height: nextH,
+        bottom: nextTop + nextH,
+      } as DOMRect;
+    });
+  }, [open, stepIndex, isEdgeStep, rect?.width, rect?.left, rect?.height, rect?.top]);
 
   return (
     <AnimatePresence>
@@ -250,23 +289,28 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
             }}
           />
 
-          {/* 高亮环 */}
+          {/* 高亮环 — key 按步重置, 避免从上一步尺寸插值出伸缩感 */}
           {rect && (
             <motion.div
+              key={`ring-${stepIndex}`}
               className="absolute pointer-events-none"
               style={{
                 left: rect.left,
                 top: rect.top,
                 width: rect.width,
                 height: rect.height,
-                borderRadius: isFullscreenStep ? 0 : isEdgeStep ? '0 20px 20px 0' : 18,
+                borderRadius: isFullscreenStep
+                  ? 0
+                  : isEdgeStep
+                    ? (ringIsLeft ? '0 18px 18px 0' : '18px 0 0 18px')
+                    : 18,
                 boxShadow: isFullscreenStep
                   ? 'inset 0 0 0 1.5px rgba(120,200,255,0.35), inset 0 0 60px rgba(80,180,255,0.10)'
                   : '0 0 0 1.5px rgba(120,200,255,0.55), 0 0 26px rgba(80,180,255,0.35), 0 0 90px rgba(60,140,255,0.18)',
               }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
             />
           )}
 
@@ -274,8 +318,9 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
           <motion.div
             ref={cardRef}
             className="absolute w-[min(340px,calc(100vw-32px))] liquid-glass rounded-2xl p-5"
+            key={stepIndex}
             style={{ left: cardX, top: cardY }}
-            initial={{ opacity: 0, y: 12 }}
+            initial={isEdgeStep ? { opacity: 0 } : { opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           >

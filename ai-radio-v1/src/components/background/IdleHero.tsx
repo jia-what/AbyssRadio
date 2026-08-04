@@ -1,12 +1,34 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Code2, Globe, Mail } from 'lucide-react';
+import { Check, Mail, MessageCircleWarning } from 'lucide-react';
 import TourGuide from '../ui/TourGuide';
 
 /**
  * 英雄区背景视频 — 本地 public/hero（Vite 以 /hero/... 访问）。
  */
 export const HERO_VIDEO_SRC = '/hero/E1.mp4';
+
+const GITHUB_REPO = 'https://github.com/jia-what/AbyssRadio';
+const GITHUB_ISSUES = 'https://github.com/jia-what/AbyssRadio/issues';
+/** QQ 邮箱 — 不用 mailto（Chrome/无邮件客户端时只会弹空白新标签） */
+const CONTACT_EMAIL = '3316067677@qq.com';
+
+/** lucide 当前包无 Github 图标, 用官方 mark SVG, 尺寸/颜色跟其余按钮一致 */
+function GitHubIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M12 2C6.477 2 2 6.586 2 12.253c0 4.537 2.865 8.387 6.839 9.748.5.095.683-.222.683-.48 0-.237-.009-.866-.013-1.7-2.782.62-3.369-1.38-3.369-1.38-.455-1.182-1.11-1.496-1.11-1.496-.908-.638.069-.625.069-.625 1.004.072 1.532 1.06 1.532 1.06.892 1.57 2.341 1.116 2.91.854.091-.662.35-1.116.636-1.372-2.22-.259-4.555-1.142-4.555-5.076 0-1.122.39-2.04 1.029-2.76-.103-.26-.446-1.302.098-2.714 0 0 .84-.276 2.75 1.055A9.3 9.3 0 0 1 12 6.84a9.3 9.3 0 0 1 2.504.346c1.909-1.331 2.748-1.055 2.748-1.055.546 1.412.203 2.454.1 2.714.64.72 1.028 1.638 1.028 2.76 0 3.944-2.338 4.814-4.566 5.067.359.318.679.945.679 1.904 0 1.374-.012 2.481-.012 2.82 0 .26.18.58.688.48A10.27 10.27 0 0 0 22 12.253C22 6.586 17.523 2 12 2Z" />
+    </svg>
+  );
+}
+
+type FooterLink = { key: string; label: string; href: string; icon: ReactNode };
 
 function fadeOpacity(
   el: HTMLElement,
@@ -94,6 +116,46 @@ function HeroLoopVideo({ src }: { src: string }) {
  */
 export default function IdleHero({ active }: { active: boolean }) {
   const [guideOpen, setGuideOpen] = useState(false);
+  const [mailCopied, setMailCopied] = useState(false);
+  const mailCopiedTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (mailCopiedTimer.current) window.clearTimeout(mailCopiedTimer.current);
+  }, []);
+
+  const copyContactEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(CONTACT_EMAIL);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = CONTACT_EMAIL;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setMailCopied(true);
+    if (mailCopiedTimer.current) window.clearTimeout(mailCopiedTimer.current);
+    mailCopiedTimer.current = window.setTimeout(() => setMailCopied(false), 2200);
+  };
+
+  const footerLinks: FooterLink[] = [
+    {
+      key: 'github',
+      label: 'GitHub 仓库',
+      href: GITHUB_REPO,
+      icon: <GitHubIcon size={20} />,
+    },
+    {
+      key: 'issues',
+      label: '问题反馈',
+      href: GITHUB_ISSUES,
+      icon: <MessageCircleWarning size={20} strokeWidth={1.75} />,
+    },
+  ];
+
   return (
     <>
       <AnimatePresence>
@@ -146,28 +208,83 @@ export default function IdleHero({ active }: { active: boolean }) {
             )}
           </div>
 
-          {/* 页底外链 — 播放栏隐藏时贴真实底部 */}
-          <div className="absolute bottom-0 inset-x-0 z-10 flex justify-center gap-4 pb-8 md:pb-10 pointer-events-none">
-            {(
-              [
-                { Icon: Code2, label: 'GitHub', href: '#' },
-                { Icon: Mail, label: '联系', href: '#' },
-                { Icon: Globe, label: '主页', href: '#' },
-              ] as const
-            ).map(({ Icon, label, href }) => (
+          {/* 页底: GitHub / Issues 反馈 / 邮箱联系 */}
+          <div className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-center gap-4 pb-8 md:pb-10 pointer-events-none">
+            {footerLinks.map((item) => (
               <a
-                key={label}
-                href={href}
-                aria-label={label}
-                title={label}
-                className="pointer-events-auto liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all duration-300"
-                onClick={(e) => {
-                  if (href === '#') e.preventDefault();
-                }}
+                key={item.key}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={item.label}
+                title={item.label}
+                className="pointer-events-auto liquid-glass rounded-full w-12 h-12 shrink-0 text-white/80 hover:text-white hover:bg-white/5 transition-colors duration-300 inline-flex items-center justify-center"
               >
-                <Icon size={20} />
+                {item.icon}
               </a>
             ))}
+
+            {/* 邮箱：toast 不能带 liquid-glass（其 position:relative / overflow:hidden 会盖掉 absolute） */}
+            <div className="relative pointer-events-auto w-12 h-12 shrink-0">
+              <button
+                type="button"
+                aria-label={`复制邮箱 ${CONTACT_EMAIL} 联系/合作`}
+                title={`复制邮箱 ${CONTACT_EMAIL} 联系/合作`}
+                className={`liquid-glass rounded-full w-12 h-12 inline-flex items-center justify-center transition-colors duration-300 ${
+                  mailCopied
+                    ? 'text-emerald-300'
+                    : 'text-white/80 hover:text-white hover:bg-white/5'
+                }`}
+                onClick={() => { void copyContactEmail(); }}
+              >
+                <span className="relative block w-5 h-5">
+                  <Mail
+                    size={20}
+                    strokeWidth={1.75}
+                    className={`absolute inset-0 m-auto transition-all duration-200 ${
+                      mailCopied ? 'opacity-0 scale-50 rotate-12' : 'opacity-100 scale-100 rotate-0'
+                    }`}
+                  />
+                  <Check
+                    size={20}
+                    strokeWidth={2.25}
+                    className={`absolute inset-0 m-auto transition-all duration-200 ${
+                      mailCopied ? 'opacity-100 scale-100 rotate-0' : 'opacity-0 scale-50 -rotate-45'
+                    }`}
+                  />
+                </span>
+              </button>
+
+              <AnimatePresence>
+                {mailCopied && (
+                  <motion.div
+                    key="mail-toast"
+                    role="status"
+                    className="absolute bottom-full left-1/2 mb-3 z-30 pointer-events-none"
+                    initial={{ opacity: 0, y: 10, x: '-50%' }}
+                    animate={{ opacity: 1, y: 0, x: '-50%' }}
+                    exit={{ opacity: 0, y: 6, x: '-50%' }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                  >
+                    <div
+                      className="whitespace-nowrap rounded-xl px-3.5 py-2 text-xs text-white/90 shadow-lg"
+                      style={{
+                        background: 'rgba(12, 14, 20, 0.78)',
+                        backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                        boxShadow:
+                          'inset 0 1px 1px rgba(255,255,255,0.12), 0 8px 24px rgba(0,0,0,0.35)',
+                        border: '1px solid rgba(255,255,255,0.14)',
+                      }}
+                    >
+                      <span className="text-emerald-300 font-medium">已复制</span>
+                      <span className="mx-1.5 text-white/30">·</span>
+                      <span className="text-white/75">{CONTACT_EMAIL}</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </motion.div>
       )}

@@ -197,7 +197,7 @@ export default function App() {
         const d = Math.abs(tl.time - t0);
         if (d < bestDist) { bestDist = d; best = tl.text; }
       }
-      if (bestDist < 1.5) translation = best;
+      if (bestDist < 2.5) translation = best;
     }
 
     return {
