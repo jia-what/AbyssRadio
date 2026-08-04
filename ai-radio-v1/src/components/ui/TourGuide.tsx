@@ -11,8 +11,10 @@ import { AnimatePresence, motion } from 'motion/react';
  */
 
 export interface GuideStep {
-  /** 高亮目标的选择器; 省略 = 中心舞台 */
+  /** 高亮目标的选择器; 省略 = 全屏框选 */
   selector?: string;
+  /** 特殊定位区域: 'bottom' = 屏幕底部播放栏区域 (未点播时播放栏不渲染, 用区域兜底) */
+  zone?: 'bottom';
   /** 引导标签, 如 "01 / Welcome" */
   kicker: string;
   title: string;
@@ -29,7 +31,7 @@ const DEFAULT_STEPS: GuideStep[] = [
   {
     kicker: 'Welcome',
     title: 'Abyss Radio — 沉浸式听歌空间',
-    body: '满屏封面粒子与歌词同场,贴边唤出 AI 与歌单。先认识一下界面,再点一首歌开始。',
+    body: '欢迎！你现在看到的界面是 Abyss Radio 主界面，扫码登录后即可播放歌曲。',
   },
   {
     selector: 'button[aria-label="打开 AI"]',
@@ -42,6 +44,12 @@ const DEFAULT_STEPS: GuideStep[] = [
     kicker: '歌单',
     title: '右侧: 歌单与登录',
     body: '贴右缘唤出歌单面板,扫码登录网易云/酷狗后就能同步自己的歌单,点播整张专辑。',
+  },
+  {
+    zone: 'bottom',
+    kicker: '联系方式/播放栏',
+    title: '下方: 播放栏',
+    body: '现在显示的是联系方式。扫码登录并播放歌曲后会弹出播放栏；鼠标移到屏幕下方，播放栏会滑出来。可以调节一系列歌曲设置。',
   },
   {
     kicker: '开始聆听',
@@ -80,7 +88,18 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
   // —— 定位目标元素 → 高亮环矩形 ——
   const locate = useCallback(() => {
     const s = steps[Math.min(stepIndex, steps.length - 1)];
-    if (!s?.selector) {
+    if (!s) return;
+    if (s.zone === 'bottom') {
+      // 底部播放栏区域: 框住屏幕底部播放栏会滑出的位置 (未点播时播放栏不渲染)
+      const barW = Math.min(920, window.innerWidth - 48);
+      const barH = 92;
+      const l = window.innerWidth / 2 - barW / 2;
+      const t = window.innerHeight - barH - 44;
+      setRect({ left: l, top: t, width: barW, height: barH, right: l + barW, bottom: t + barH } as DOMRect);
+      setCardSide('above');
+      return;
+    }
+    if (!s.selector) {
       // 无 selector: 全屏框选 (欢迎/结尾步骤) — 不裁内容, 遮罩均匀压暗
       setRect({
         left: 0, top: 0, width: window.innerWidth, height: window.innerHeight,
@@ -167,7 +186,7 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
     [next],
   );
 
-  const isFullscreenStep = !step?.selector;
+  const isFullscreenStep = !step?.selector && step?.zone !== 'bottom';
   const isEdgeStep = !!step?.selector && (step.selector.includes('aria-label="打开 AI"') || step.selector.includes('aria-label="打开歌单"'));
   const cardW = Math.min(340, window.innerWidth - 32);
   let cardX: number;
@@ -177,6 +196,10 @@ export default function TourGuide({ open, onClose, steps = DEFAULT_STEPS }: Tour
       // 全屏步骤: 卡片居中偏下
       cardX = Math.max(16, window.innerWidth / 2 - cardW / 2);
       cardY = Math.max(16, window.innerHeight / 2 + 40);
+    } else if (step?.zone === 'bottom') {
+      // 底部播放栏步骤: 卡片放高亮框上方
+      cardX = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width / 2 - cardW / 2));
+      cardY = Math.max(16, rect.top - 210);
     } else if (isEdgeStep) {
       // 边缘热区步骤: 卡片放高亮环右侧, 垂直与环中心对齐, 避免重叠
       cardX = Math.min(window.innerWidth - cardW - 16, rect.right + 18);

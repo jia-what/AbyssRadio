@@ -135,13 +135,15 @@ export default function IdleHero({ active }: { active: boolean }) {
               扫码登录后点播，把声音沉进深渊里的霓虹黄昏。
             </p>
 
-            <button
-              type="button"
-              className="pointer-events-auto mt-8 liquid-glass rounded-full px-8 py-3 text-white text-sm font-medium hover:bg-white/5 transition-colors duration-300"
-              onClick={() => setGuideOpen(true)}
-            >
-              引导
-            </button>
+            {!guideOpen && (
+              <button
+                type="button"
+                className="pointer-events-auto mt-8 liquid-glass rounded-full px-8 py-3 text-white text-sm font-medium hover:bg-white/5 transition-colors duration-300"
+                onClick={() => setGuideOpen(true)}
+              >
+                引导
+              </button>
+            )}
           </div>
 
           {/* 页底外链 — 播放栏隐藏时贴真实底部 */}
