@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Code2, Globe, Mail } from 'lucide-react';
+import TourGuide from '../ui/TourGuide';
 
 /**
  * 英雄区背景视频 — 本地 public/hero（Vite 以 /hero/... 访问）。
@@ -92,8 +93,10 @@ function HeroLoopVideo({ src }: { src: string }) {
  * 点播后整层淡出，封面粒子 + 歌词淡入衔接。
  */
 export default function IdleHero({ active }: { active: boolean }) {
+  const [guideOpen, setGuideOpen] = useState(false);
   return (
-    <AnimatePresence>
+    <>
+      <AnimatePresence>
       {active && (
         <motion.div
           key="idle-hero"
@@ -135,11 +138,9 @@ export default function IdleHero({ active }: { active: boolean }) {
             <button
               type="button"
               className="pointer-events-auto mt-8 liquid-glass rounded-full px-8 py-3 text-white text-sm font-medium hover:bg-white/5 transition-colors duration-300"
-              onClick={() => {
-                // 功能稍后接：关于 / 宣言 / 引导等
-              }}
+              onClick={() => setGuideOpen(true)}
             >
-              Manifesto
+              引导
             </button>
           </div>
 
@@ -169,5 +170,9 @@ export default function IdleHero({ active }: { active: boolean }) {
         </motion.div>
       )}
     </AnimatePresence>
+
+      {/* 引导浮层 — 独立于英雄层, 不随 active 卸载 */}
+      <TourGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
+    </>
   );
 }
