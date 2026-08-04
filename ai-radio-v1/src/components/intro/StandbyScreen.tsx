@@ -54,7 +54,7 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
         parallax={0.04}
       />
 
-      {/* 中央字标组 */}
+      {/* 中央字标组 + 按钮 (按钮在标题正下方) */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <motion.div
           className="text-white/95 font-semibold"
@@ -71,25 +71,15 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
           ABYSS RADIO
         </motion.div>
 
+        {/* 按钮 — 标题正下方, pointer-events-auto 恢复可点 */}
         <motion.div
-          className="mt-5 text-white/40 text-[clamp(11px,1.3vw,14px)] tracking-[0.6em] pl-[0.6em]"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.7, duration: 0.7 }}
-        >
-          DEEP SIGNAL
-        </motion.div>
-      </div>
-
-      {/* 点击进入按钮 (唯一入口) */}
-      <div className="absolute inset-x-0 bottom-[14vh] flex justify-center">
-        <motion.div
+          className="mt-10 pointer-events-auto"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.0, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ delay: 0.9, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
           <SpecularButton
-            size="lg"
+            size="md"
             radius={999}
             tint="#ffffff"
             tintOpacity={0.05}

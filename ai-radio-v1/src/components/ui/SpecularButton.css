@@ -16,7 +16,7 @@
   font-family: inherit;
   font-weight: 500;
   letter-spacing: 0.35em;
-  padding-left: calc(1.15rem + 0.35em); /* 补偿 letter-spacing 视觉偏移 */
+  text-indent: 0.35em; /* 抵消末字符 letter-spacing, 保持文字视觉居中 */
   line-height: 1;
   color: var(--sb-text-color);
   background: color-mix(in srgb, var(--sb-tint) calc(var(--sb-tint-opacity) * 100%), transparent);
@@ -61,7 +61,7 @@
 
 .specular-button--lg {
   font-size: 1.15rem;
-  padding: 18px 40px;
+  padding: 12px 30px;
 }
 
 /* Canvas extends past the button so the rim glow can bleed outside the edge */
