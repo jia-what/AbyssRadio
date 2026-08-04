@@ -241,9 +241,10 @@ export default function App() {
         <IdleHero active={!currentTrack} />
         {isPortaling && <PortalAnimation onComplete={endPortal} />}
 
+        {/* 拖拽层: 未点播 (Hero 界面) 时放行点击, 让引导/外链按钮可点; 点播后接管拖拽 */}
         <div
           ref={layerRef}
-          className="absolute inset-0 z-[2] touch-none cursor-grab active:cursor-grabbing"
+          className={`absolute inset-0 z-[2] touch-none ${currentTrack ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
           {...handlers}
         />
 

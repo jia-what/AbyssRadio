@@ -6,7 +6,7 @@ import TourGuide from '../ui/TourGuide';
 /**
  * 英雄区背景视频 — 本地 public/hero（Vite 以 /hero/... 访问）。
  */
-export const HERO_VIDEO_SRC = '/hero/E2.mp4';
+export const HERO_VIDEO_SRC = '/hero/E1.mp4';
 
 function fadeOpacity(
   el: HTMLElement,
