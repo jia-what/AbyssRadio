@@ -521,6 +521,8 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               fade={0.28}
                               minOpacity={0.04}
                               smoothing={220}
+                              loop
+                              visible={6}
                             />
                           )}
                         </motion.div>
@@ -556,6 +558,8 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               fade={0.26}
                               minOpacity={0.04}
                               smoothing={200}
+                              loop
+                              visible={6}
                             />
                           )}
                         </motion.div>

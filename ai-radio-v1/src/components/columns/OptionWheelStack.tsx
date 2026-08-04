@@ -40,6 +40,11 @@ interface OptionWheelStackProps<T extends { id: string }> {
   loop?: boolean;
   /** 允许指针拖拽 */
   draggable?: boolean;
+  /**
+   * 渲染窗口半径: 只挂载中心 ±visible 张卡片, 其余不渲染。
+   * 大列表 (上千首歌) 必须开启, 否则每帧对全部元素写样式会卡爆。
+   */
+  visible?: number;
   className?: string;
   onFocusItem?: (item: T) => void;
 }
@@ -59,6 +64,7 @@ export default function OptionWheelStack<T extends { id: string }>({
   smoothing = 200,
   loop = false,
   draggable = true,
+  visible = 6,
   className = '',
   onFocusItem,
 }: OptionWheelStackProps<T>) {
@@ -284,7 +290,16 @@ export default function OptionWheelStack<T extends { id: string }>({
     >
       {items.map((item, i) => {
         const offset = i - activeIndex;
-        const abs = Math.abs(offset);
+        // 循环距离 (loop 模式下最近路径)
+        let dWrap = offset;
+        const n = items.length;
+        if (loop && n > 1) {
+          dWrap = ((offset % n) + n) % n;
+          if (dWrap > n / 2) dWrap -= n;
+        }
+        const abs = Math.abs(dWrap);
+        // 渲染窗口: 远处的卡片不挂载 (大列表性能关键)
+        if (abs > visible) return null;
         const active = offset === 0;
         return (
           <div
