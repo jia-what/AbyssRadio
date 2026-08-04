@@ -47,6 +47,8 @@ interface OptionWheelStackProps<T extends { id: string }> {
   visible?: number;
   className?: string;
   onFocusItem?: (item: T) => void;
+  /** 再次点击「已选中」卡片时回调（歌曲列表用来直接播放） */
+  onActivateItem?: (item: T, index: number) => void;
 }
 
 export default function OptionWheelStack<T extends { id: string }>({
@@ -67,6 +69,7 @@ export default function OptionWheelStack<T extends { id: string }>({
   visible = 6,
   className = '',
   onFocusItem,
+  onActivateItem,
 }: OptionWheelStackProps<T>) {
   const rootRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -76,6 +79,7 @@ export default function OptionWheelStack<T extends { id: string }>({
   const lastRef = useRef(0);
   const cfgRef = useRef({});
   const onActiveChangeRef = useRef(onActiveChange);
+  const onActivateItemRef = useRef(onActivateItem);
   const selectedRef = useRef(activeIndex);
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragRef = useRef<{ y: number; start: number; id: number } | null>(null);
@@ -83,8 +87,11 @@ export default function OptionWheelStack<T extends { id: string }>({
   /** 本次 activeIndex 变化是否由组件自身滚动触发 (loop 模式保持连续位置, 不重置) */
   const internalChangeRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   onActiveChangeRef.current = onActiveChange;
+  onActivateItemRef.current = onActivateItem;
   cfgRef.current = {
     count: items.length,
     rowH: Math.max(gap, 1),
@@ -154,7 +161,9 @@ export default function OptionWheelStack<T extends { id: string }>({
       el.style.opacity = String(Math.max(cfg.minOpacity, 1 - dist * cfg.fade));
       el.style.filter = cfg.blur > 0 ? `blur(${(dist * cfg.blur).toFixed(2)}px)` : 'none';
       el.style.zIndex = String(100 - dist);
-      el.style.pointerEvents = dist <= 1 ? 'auto' : 'none';
+      // 可点性跟「已选中索引」走, 不跟平滑位置走 —— 否则滚轮刚停下、
+      // UI 已展开「播放」但 dist 仍 >0.5 时, 按钮看着能点实际 pointer-events:none
+      el.style.pointerEvents = i === selectedRef.current ? 'auto' : 'none';
     }
 
     rafRef.current = Math.abs(target - next) < 0.001 ? null : requestAnimationFrame(runFrame);
@@ -234,9 +243,11 @@ export default function OptionWheelStack<T extends { id: string }>({
 
   const handlePointerEnd = useCallback(() => {
     if (!dragRef.current) return;
+    const moved = dragMovedRef.current;
     dragRef.current = null;
+    dragMovedRef.current = false;
     setIsDragging(false);
-    if (dragMovedRef.current) applyTarget(targetRef.current, true);
+    if (moved) applyTarget(targetRef.current, true);
   }, [applyTarget]);
 
   // 键盘
@@ -265,13 +276,21 @@ export default function OptionWheelStack<T extends { id: string }>({
     startLoop();
   }, [activeIndex, startLoop]);
 
-  // 点击卡片选中 (loop 模式走最近路径, 避免绕远路)
+  // 点击卡片选中; 再次点击已选中项 → onActivateItem（播歌）
   const handleItemClick = useCallback(
     (index: number) => {
-      if (dragMovedRef.current) return;
+      if (dragMovedRef.current) {
+        dragMovedRef.current = false;
+        return;
+      }
       const cfg = cfgRef.current as { count: number; loop: boolean };
+      const cur = ((Math.round(targetRef.current) % Math.max(cfg.count, 1)) + Math.max(cfg.count, 1)) % Math.max(cfg.count, 1);
+      if (index === selectedRef.current || index === cur) {
+        const item = itemsRef.current[index];
+        if (item) onActivateItemRef.current?.(item, index);
+        return;
+      }
       if (cfg.loop && cfg.count > 1) {
-        const cur = ((Math.round(targetRef.current) % cfg.count) + cfg.count) % cfg.count;
         let d = index - cur;
         if (d > cfg.count / 2) d -= cfg.count;
         else if (d < -cfg.count / 2) d += cfg.count;
@@ -329,8 +348,12 @@ export default function OptionWheelStack<T extends { id: string }>({
         }
         const abs = Math.abs(dWrap);
         // 渲染窗口: 远处的卡片不挂载 (大列表性能关键)
-        if (abs > visible) return null;
-        const active = offset === 0;
+        if (abs > visible) {
+          // 离开窗口时清掉 ref, 避免 rAF 写到已卸载/错位节点
+          itemRefs.current[i] = null;
+          return null;
+        }
+        const active = i === activeIndex;
         return (
           <div
             key={item.id}
@@ -342,7 +365,7 @@ export default function OptionWheelStack<T extends { id: string }>({
             className="ow-stack__item"
             onClick={() => handleItemClick(i)}
           >
-            {renderCard(item, { active, offset, abs, index: i })}
+            {renderCard(item, { active, offset: dWrap, abs, index: i })}
           </div>
         );
       })}

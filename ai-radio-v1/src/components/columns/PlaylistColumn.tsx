@@ -8,6 +8,8 @@ import {
   type Platform, type Playlist, type PlaylistTrack, type BindResult, type QrPollCode,
 } from '../../services/playlistApi';
 import CoverThumb from '../ui/CoverThumb';
+import TiltedCard from '../ui/TiltedCard';
+import PressSpring from '../ui/PressSpring';
 import type { StackCardState } from './SpatialStack';
 import OptionWheelStack from './OptionWheelStack';
 
@@ -250,87 +252,106 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
   const renderPlaylistCard = (pl: Playlist, s: StackCardState) => {
     if (!s.active) {
       return (
-        <button
-          onClick={() => setPlActive(s.index)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl liquid-glass text-left"
-        >
-          <CoverThumb cover={pl.cover} className="w-11 h-11 rounded-lg shrink-0 border border-white/[0.06]" />
-          <div className="min-w-0 flex-1">
-            <div className="text-white/55 text-xs truncate">{pl.name}</div>
-            <div className="text-white/25 text-[10px]">{pl.trackCount} 首</div>
-          </div>
-        </button>
+        <TiltedCard rotateAmplitude={6} scaleOnHover={1.03} showTooltip={false} showMobileWarning={false}>
+          <PressSpring
+            as="button"
+            type="button"
+            pressScale={0.97}
+            onClick={() => setPlActive(s.index)}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl liquid-glass text-left"
+          >
+            <CoverThumb cover={pl.cover} className="w-11 h-11 rounded-lg shrink-0 border border-white/[0.06]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-white/55 text-xs truncate">{pl.name}</div>
+              <div className="text-white/25 text-[10px]">{pl.trackCount} 首</div>
+            </div>
+          </PressSpring>
+        </TiltedCard>
       );
     }
     return (
-      <div className="w-full rounded-2xl liquid-glass p-3.5">
-        <div className="flex gap-3.5">
-          <div className="relative w-[88px] h-[88px] rounded-xl shrink-0 border border-white/[0.08] overflow-hidden">
-            <CoverThumb cover={pl.cover} className="w-full h-full" />
-            <div className="absolute inset-0 z-[2] flex items-center justify-center bg-black/25 pointer-events-none">
-              <Play size={22} className="text-white/80" fill="currentColor" />
+      <TiltedCard rotateAmplitude={8} scaleOnHover={1.04} showTooltip={false} showMobileWarning={false}>
+        <div className="w-full rounded-2xl liquid-glass p-3.5">
+          <div className="flex gap-3.5">
+            <div className="relative w-[88px] h-[88px] rounded-xl shrink-0 border border-white/[0.08] overflow-hidden">
+              <CoverThumb cover={pl.cover} className="w-full h-full" />
+              <div className="absolute inset-0 z-[2] flex items-center justify-center bg-black/25 pointer-events-none">
+                <Play size={22} className="text-white/80" fill="currentColor" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1 flex flex-col justify-center">
+              <div className="text-white/35 text-[10px] tracking-[2px] uppercase mb-1">我的歌单</div>
+              <div className="text-white/85 text-sm font-medium leading-snug line-clamp-2">{pl.name}</div>
+              <div className="text-white/30 text-[10px] mt-1.5">
+                {sourceLabel(pl.source)} · {pl.trackCount} 首{pl.playCount ? ` · 播放 ${pl.playCount}` : ''}
+              </div>
             </div>
           </div>
-          <div className="min-w-0 flex-1 flex flex-col justify-center">
-            <div className="text-white/35 text-[10px] tracking-[2px] uppercase mb-1">我的歌单</div>
-            <div className="text-white/85 text-sm font-medium leading-snug line-clamp-2">{pl.name}</div>
-            <div className="text-white/30 text-[10px] mt-1.5">
-              {sourceLabel(pl.source)} · {pl.trackCount} 首{pl.playCount ? ` · 播放 ${pl.playCount}` : ''}
-            </div>
+          <div className="flex items-center gap-2 mt-3.5">
+            <PressSpring
+              as="button"
+              type="button"
+              pressScale={0.94}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                void playWholePlaylist(pl);
+              }}
+              className="flex items-center gap-1.5 text-[11px] tracking-wide text-emerald-950/90 bg-emerald-300/85 hover:bg-emerald-300 rounded-full px-4 py-1.5 transition-colors duration-300 pointer-events-auto"
+            >
+              <Play size={11} fill="currentColor" className="pointer-events-none" />
+              播放歌单
+            </PressSpring>
+            <PressSpring
+              as="button"
+              type="button"
+              pressScale={0.94}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                void openPlaylist(pl);
+              }}
+              className="text-[11px] tracking-wide text-white/55 hover:text-white/80 border border-white/[0.12] rounded-full px-4 py-1.5 transition-colors duration-300 pointer-events-auto"
+            >
+              详情
+            </PressSpring>
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-3.5">
-          <button
-            onClick={() => playWholePlaylist(pl)}
-            className="flex items-center gap-1.5 text-[11px] tracking-wide text-emerald-950/90 bg-emerald-300/85 hover:bg-emerald-300 rounded-full px-4 py-1.5 transition-colors duration-300"
-          >
-            <Play size={11} fill="currentColor" />
-            播放歌单
-          </button>
-          <button
-            onClick={() => openPlaylist(pl)}
-            className="text-[11px] tracking-wide text-white/55 hover:text-white/80 border border-white/[0.12] rounded-full px-4 py-1.5 transition-colors duration-300"
-          >
-            详情
-          </button>
-        </div>
-      </div>
+      </TiltedCard>
     );
   };
 
-  // ===== Track row (focused expands action buttons) =====
+  // ===== Track row: 整卡点击播放（无播放按钮）；歌单外层两按钮保留 =====
   const renderTrackCard = (t: PlaylistTrack, s: StackCardState) => {
     if (!s.active) {
       return (
-        <button
-          onClick={() => setTrkActive(s.index)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left"
-        >
-          <span className="text-white/20 text-[10px] w-5 text-right tabular-nums shrink-0">{s.index + 1}</span>
-          <CoverThumb cover={t.cover} className="w-9 h-9 rounded-md shrink-0 border border-white/[0.06]" />
-          <div className="min-w-0 flex-1">
-            <div className="text-white/55 text-xs truncate">{t.title}</div>
-            <div className="text-white/25 text-[10px] truncate">{t.artist}</div>
-          </div>
-        </button>
+        <TiltedCard rotateAmplitude={5} scaleOnHover={1.03} showTooltip={false} showMobileWarning={false}>
+          <PressSpring pressScale={0.97} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left">
+            <span className="text-white/20 text-[10px] w-5 text-right tabular-nums shrink-0">{s.index + 1}</span>
+            <CoverThumb cover={t.cover} className="w-9 h-9 rounded-md shrink-0 border border-white/[0.06]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-white/55 text-xs truncate">{t.title}</div>
+              <div className="text-white/25 text-[10px] truncate">{t.artist}</div>
+            </div>
+          </PressSpring>
+        </TiltedCard>
       );
     }
     return (
-      <div className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl liquid-glass">
-        <span className="text-emerald-300/70 text-[10px] w-5 text-right tabular-nums shrink-0">{s.index + 1}</span>
-        <CoverThumb cover={t.cover} className="w-10 h-10 rounded-md shrink-0 border border-white/[0.08]" />
-        <div className="min-w-0 flex-1">
-          <div className="text-white/90 text-xs truncate">{t.title}</div>
-          <div className="text-white/35 text-[10px] truncate">{t.artist}</div>
-        </div>
-        <button
-          onClick={() => bind && onPlayPlaylist(tracks, s.index, bind.key)}
-          className="flex items-center gap-1 text-[11px] text-emerald-950/90 bg-emerald-300/85 hover:bg-emerald-300 rounded-full px-3 py-1.5 shrink-0 transition-colors duration-300"
+      <TiltedCard rotateAmplitude={7} scaleOnHover={1.04} showTooltip={false} showMobileWarning={false}>
+        <PressSpring
+          pressScale={0.97}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl liquid-glass text-left cursor-pointer"
         >
-          <Play size={10} fill="currentColor" />
-          播放
-        </button>
-      </div>
+          <span className="text-emerald-300/70 text-[10px] w-5 text-right tabular-nums shrink-0">{s.index + 1}</span>
+          <CoverThumb cover={t.cover} className="w-10 h-10 rounded-md shrink-0 border border-white/[0.08]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-white/90 text-xs truncate">{t.title}</div>
+            <div className="text-white/35 text-[10px] truncate">{t.artist}</div>
+          </div>
+          <span className="text-[10px] text-emerald-300/45 tracking-wide shrink-0">点击播放</span>
+        </PressSpring>
+      </TiltedCard>
     );
   };
 
@@ -370,21 +391,17 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
               initial={{ opacity: 0 }}
               animate={{
                 opacity: 1,
-                x: focused ? -36 : 0,
-                scale: focused ? 1.08 : 1,
-                rotateY: focused ? -24 : -8,
-                z: focused ? 80 : 0,
+                x: focused ? -16 : 0,
+                scale: focused ? 1.03 : 1,
               }}
               exit={{ opacity: 0 }}
               transition={{ type: 'spring', stiffness: 170, damping: 26, mass: 0.85 }}
               className={`relative z-10 mr-5 w-[360px] flex flex-col ${focused ? 'h-[84vh]' : 'h-[76vh]'}`}
               style={{
-                perspective: 1400,
                 transformOrigin: 'right center',
-                transformStyle: 'preserve-3d',
               }}
             >
-            <div className="w-full h-full flex flex-col" style={{ transformStyle: 'preserve-3d' }}>
+            <div className="w-full h-full flex flex-col">
               {/* ===== Bind view ===== */}
               {view === 'bind' && (
                 <div className="liquid-glass rounded-2xl p-5 flex flex-col h-full items-center">
@@ -489,7 +506,7 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                     )}
                   </div>
 
-                  <div className="flex-1 min-h-0 relative" style={{ transformStyle: 'preserve-3d' }}>
+                  <div className="flex-1 min-h-0 relative">
                     <AnimatePresence mode="wait">
                       {view === 'playlists' && (
                         <motion.div
@@ -499,7 +516,6 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.45 }}
                           className="absolute inset-0"
-                          style={{ transformStyle: 'preserve-3d' }}
                         >
                           {loading && playlists.length === 0 ? (
                             <div className="absolute inset-0 flex items-center justify-center text-white/20 text-xs">载入中...</div>
@@ -536,7 +552,6 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.45 }}
                           className="absolute inset-0"
-                          style={{ transformStyle: 'preserve-3d' }}
                         >
                           {loading && tracks.length === 0 ? (
                             <div className="absolute inset-0 flex items-center justify-center text-white/20 text-xs">载入中...</div>
@@ -549,6 +564,10 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
                               items={tracks}
                               activeIndex={trkActive}
                               onActiveChange={setTrkActive}
+                              onActivateItem={(_t, index) => {
+                                if (!bind) return;
+                                onPlayPlaylist(tracks, index, bind.key);
+                              }}
                               renderCard={renderTrackCard}
                               side="right"
                               gap={76}
