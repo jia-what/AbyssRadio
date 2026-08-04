@@ -80,6 +80,8 @@ export default function OptionWheelStack<T extends { id: string }>({
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragRef = useRef<{ y: number; start: number; id: number } | null>(null);
   const dragMovedRef = useRef(false);
+  /** 本次 activeIndex 变化是否由组件自身滚动触发 (loop 模式保持连续位置, 不重置) */
+  const internalChangeRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
 
   onActiveChangeRef.current = onActiveChange;
@@ -107,15 +109,25 @@ export default function OptionWheelStack<T extends { id: string }>({
     };
     const tau = Math.max(cfg.smoothing, 1) / 1000;
     const k = 1 - Math.exp(-dt / tau);
+    const n = cfg.count;
 
     const target = targetRef.current;
     const cur = posRef.current;
     let next = cur + (target - cur) * k;
     if (Math.abs(target - next) < 0.001) next = target;
+    // loop 模式归一化: 位置保持在一个列表跨度内, 防长时间滚动浮点漂移
+    if (cfg.loop && n > 1) {
+      const span = n * 4;
+      if (Math.abs(next) > span) {
+        const wrap = Math.round(next / n) * n;
+        next -= wrap;
+        posRef.current = next;
+        targetRef.current -= wrap;
+      }
+    }
     posRef.current = next;
 
     const els = itemRefs.current;
-    const n = cfg.count;
     const mirror = cfg.side === 'right' ? -1 : 1;
     const tiltRad = (cfg.tilt * Math.PI) / 180;
     const R = tiltRad > 0.0005 ? cfg.rowH / tiltRad : 0;
@@ -164,6 +176,7 @@ export default function OptionWheelStack<T extends { id: string }>({
       const idx = ((Math.round(v) % cfg.count) + cfg.count) % cfg.count;
       if (idx !== selectedRef.current) {
         selectedRef.current = idx;
+        internalChangeRef.current = true;
         onActiveChangeRef.current?.(idx);
       }
       startLoop();
@@ -193,6 +206,10 @@ export default function OptionWheelStack<T extends { id: string }>({
 
   // 拖拽
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    // 落在按钮/链接上的按下不参与拖拽 — 否则 pointer capture 会把 click
+    // 重定向到根元素, 按钮的 onClick 永远收不到 (播放/详情按钮失灵根因)
+    const t = e.target as HTMLElement;
+    if (t.closest('button, a, [role="button"]')) return;
     if (!(cfgRef.current as { draggable: boolean }).draggable) return;
     dragRef.current = { y: e.clientY, start: targetRef.current, id: e.pointerId };
     dragMovedRef.current = false;
@@ -235,8 +252,12 @@ export default function OptionWheelStack<T extends { id: string }>({
     [applyTarget],
   );
 
-  // 受控 activeIndex 外部变化 → 同步目标
+  // 受控 activeIndex 外部变化 → 同步目标; 组件自身滚动产生的变化则保持连续位置
   useEffect(() => {
+    if (internalChangeRef.current) {
+      internalChangeRef.current = false;
+      return;
+    }
     const cfg = cfgRef.current as { count: number; loop: boolean };
     const v = cfg.loop ? activeIndex : Math.min(Math.max(activeIndex, 0), Math.max(cfg.count - 1, 0));
     targetRef.current = v;
@@ -244,11 +265,20 @@ export default function OptionWheelStack<T extends { id: string }>({
     startLoop();
   }, [activeIndex, startLoop]);
 
-  // 点击卡片选中
+  // 点击卡片选中 (loop 模式走最近路径, 避免绕远路)
   const handleItemClick = useCallback(
     (index: number) => {
       if (dragMovedRef.current) return;
-      applyTarget(index, true);
+      const cfg = cfgRef.current as { count: number; loop: boolean };
+      if (cfg.loop && cfg.count > 1) {
+        const cur = ((Math.round(targetRef.current) % cfg.count) + cfg.count) % cfg.count;
+        let d = index - cur;
+        if (d > cfg.count / 2) d -= cfg.count;
+        else if (d < -cfg.count / 2) d += cfg.count;
+        applyTarget(targetRef.current + d, true);
+      } else {
+        applyTarget(index, true);
+      }
     },
     [applyTarget],
   );
