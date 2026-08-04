@@ -1,4 +1,5 @@
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import ElasticSlider from '../ui/ElasticSlider';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Track } from '../../types';
@@ -41,11 +42,8 @@ export default function BottomBar({
 }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [localProgress, setLocalProgress] = useState(progress);
-  const [volHover, setVolHover] = useState(false);
-  const [isVolDragging, setIsVolDragging] = useState(false);
   const [snapProgress, setSnapProgress] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
-  const volumeBarRef = useRef<HTMLDivElement>(null);
   const trackIdRef = useRef(track?.id);
 
   const displayDur = realDuration || duration || 1;
@@ -119,52 +117,6 @@ export default function BottomBar({
       window.removeEventListener('touchend', onTouchEnd);
     };
   }, [isDragging, calcProgressPct, onSeek]);
-
-  const calcVolPct = useCallback((clientX: number) => {
-    if (!volumeBarRef.current) return 0;
-    const rect = volumeBarRef.current.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  }, []);
-
-  const beginVolumeAdjust = useCallback((clientX: number) => {
-    onVolumeChange(calcVolPct(clientX));
-    setIsVolDragging(true);
-  }, [calcVolPct, onVolumeChange]);
-
-  const handleVolumeDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    beginVolumeAdjust(e.clientX);
-  }, [beginVolumeAdjust]);
-
-  const handleVolumeTouch = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    if (!touch) return;
-    e.preventDefault();
-    beginVolumeAdjust(touch.clientX);
-  }, [beginVolumeAdjust]);
-
-  useEffect(() => {
-    if (!isVolDragging) return;
-    const onMove = (clientX: number) => onVolumeChange(calcVolPct(clientX));
-    const onMouseMove = (e: MouseEvent) => onMove(e.clientX);
-    const onTouchMove = (e: TouchEvent) => {
-      const touch = e.touches[0];
-      if (touch) onMove(touch.clientX);
-    };
-    const onMouseUp = () => setIsVolDragging(false);
-    const onTouchEnd = () => setIsVolDragging(false);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-    };
-  }, [isVolDragging, calcVolPct, onVolumeChange]);
 
   const coverStyle = isImageUrl(track?.cover)
     ? { backgroundImage: `url(${coverUrl(track?.cover)})` }
@@ -277,11 +229,7 @@ export default function BottomBar({
               >
                 {LYRIC_MODE_LABEL[lyricMode]}
               </button>
-              <div
-                className="flex items-center gap-2 shrink-0"
-                onMouseEnter={() => setVolHover(true)}
-                onMouseLeave={() => setVolHover(false)}
-              >
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={onToggleMute}
@@ -289,34 +237,17 @@ export default function BottomBar({
                 >
                   {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
                 </button>
-                <div
-                  ref={volumeBarRef}
-                  className="relative w-14 h-5 flex items-center cursor-pointer touch-none rounded-full"
-                  style={{ background: 'rgba(255,255,255,0.06)' }}
-                  onMouseDown={handleVolumeDown}
-                  onTouchStart={handleVolumeTouch}
-                  role="slider"
-                  aria-label="音量"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(vol * 100)}
-                >
-                  <div
-                    className="absolute left-0 top-1/2 -translate-y-1/2 h-[3px] rounded-full transition-all duration-150"
-                    style={{
-                      width: `${vol * 100}%`,
-                      background: 'rgba(150,200,255,0.45)',
-                    }}
-                  />
-                  <div
-                    className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none transition-opacity duration-150"
-                    style={{
-                      left: `calc(${vol * 100}% - 4px)`,
-                      background: 'rgba(200,220,255,0.85)',
-                      opacity: isVolDragging || volHover ? 1 : 0,
-                    }}
-                  />
-                </div>
+                <ElasticSlider
+                  className="!w-28"
+                  defaultValue={Math.round(vol * 100)}
+                  startingValue={0}
+                  maxValue={100}
+                  isStepped
+                  stepSize={1}
+                  onChange={(v) => onVolumeChange(v / 100)}
+                  leftIcon={null}
+                  rightIcon={<Volume2 size={13} className="text-white/30" />}
+                />
               </div>
             </div>
           </div>
