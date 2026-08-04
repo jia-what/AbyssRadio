@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import MagicRings from './MagicRings';
 import SpecularButton from '../ui/SpecularButton';
+import ShinyText from '../ui/ShinyText';
 
 /**
  * StandbyScreen — 动态待机画面 (默认入口)
@@ -56,19 +57,28 @@ export default function StandbyScreen({ onEnter }: { onEnter: () => void }) {
 
       {/* 中央字标组 + 按钮 (按钮在标题正下方) */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        {/* 主标题 — 流光扫过效果 */}
         <motion.div
-          className="text-white/95 font-semibold"
+          className="font-semibold"
           style={{
             fontSize: 'clamp(34px, 5.4vw, 64px)',
             letterSpacing: '0.3em',
             paddingLeft: '0.3em',
-            textShadow: '0 0 52px rgba(80,190,255,0.3), 0 2px 18px rgba(0,0,0,0.6)',
           }}
           initial={{ opacity: 0, y: 18, filter: 'blur(10px)' }}
           animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
           transition={{ delay: 0.15, duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
         >
-          ABYSS RADIO
+          <ShinyText
+            text="ABYSS RADIO"
+            speed={3.5}
+            color="rgba(255,255,255,0.4)"
+            shineColor="#ffffff"
+            spread={90}
+            direction="left"
+            delay={0.8}
+            stops={[0.46, 0.5, 0.54]}
+          />
         </motion.div>
 
         {/* 按钮 — 标题正下方, pointer-events-auto 恢复可点 */}
