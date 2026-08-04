@@ -225,6 +225,10 @@ export default function CoverParticleField({
     const uDepth = gl.getUniformLocation(program, 'uDepth');
     const uPixel = gl.getUniformLocation(program, 'uPixel');
     const uPointScale = gl.getUniformLocation(program, 'uPointScale');
+    const uMouseActive = gl.getUniformLocation(program, 'uMouseActive');
+    const uMouse = gl.getUniformLocation(program, 'uMouse');
+    const uMouseRadius = gl.getUniformLocation(program, 'uMouseRadius');
+    const uMouseStrength = gl.getUniformLocation(program, 'uMouseStrength');
     const uAlpha = gl.getUniformLocation(program, 'uAlpha');
     const uCoverTex = gl.getUniformLocation(program, 'uCoverTex');
     const uPrevCoverTex = gl.getUniformLocation(program, 'uPrevCoverTex');
@@ -342,6 +346,24 @@ export default function CoverParticleField({
     window.addEventListener('resize', resize);
     syncFocus();
 
+    // ——— Mouse bulge interaction (DotField-style) ———
+    // Normalized cursor in cover-plane UV space (y flipped: UV v=0 at bottom).
+    const mouseUV = { x: -9, y: -9 };
+    const mouseActive = { v: 0 };
+    let mouseLastMove = 0;
+    const onMouseMove = (e: MouseEvent) => {
+      mouseUV.x = e.clientX / Math.max(1, window.innerWidth);
+      mouseUV.y = 1 - e.clientY / Math.max(1, window.innerHeight);
+      mouseActive.v = 1;
+      mouseLastMove = performance.now();
+    };
+    const onMouseLeave = () => {
+      // Fade out the bulge when pointer leaves the window (no abrupt pop)
+      mouseActive.v = 0;
+    };
+    window.addEventListener('mousemove', onMouseMove, { passive: true });
+    document.addEventListener('mouseleave', onMouseLeave);
+
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0, 0, 0, 0);
@@ -390,6 +412,15 @@ export default function CoverParticleField({
       gl.uniform1f(uPixel, dpr);
       gl.uniform1f(uPointScale, 1.45);
       gl.uniform1f(uAlpha, 0.94);
+
+      // Mouse bulge: fade active flag if pointer hasn't moved in 1.5s
+      if (mouseActive.v > 0 && performance.now() - mouseLastMove > 1500) {
+        mouseActive.v = 0;
+      }
+      gl.uniform1f(uMouseActive, mouseActive.v);
+      gl.uniform2f(uMouse, mouseUV.x, mouseUV.y);
+      gl.uniform1f(uMouseRadius, 0.2);
+      gl.uniform1f(uMouseStrength, 0.15);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, coverTex);
@@ -499,6 +530,8 @@ export default function CoverParticleField({
       disposed = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
+      window.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseleave', onMouseLeave);
       gl.deleteProgram(program);
       gl.deleteBuffer(posBuf);
       gl.deleteBuffer(uvBuf);
