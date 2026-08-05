@@ -514,12 +514,23 @@ export function useRadioState() {
   const searchAndInsertPlay = useCallback(async (
     query: string,
     sessionKey?: string,
-  ): Promise<Track | null> => {
+  ): Promise<Track | { ambiguous: string[] } | null> => {
     try {
       const q = String(query || '').trim();
       if (!q) return null;
       const results = await searchMusic(q, 'both', 12);
       if (!results || results.length === 0) return null;
+
+      // 同名歧义检测：与查询同名的候选里出现多个不同艺人 → 不猜，交上层澄清
+      // （修 播放 HABIBTI → 乱播 Ard Adz；宁可多问一句，绝不猜曲）
+      const qTitle = q.replace(/^.+?\s+by\s+.+$/i, (m) => m.split(/\s+by\s+/i)[0]).trim();
+      const normT = (s: string) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      const nq = normT(qTitle);
+      const sameTitle = results.filter((r) => normT(r.title || '') === nq || (nq.length >= 3 && normT(r.title || '').includes(nq)));
+      if (sameTitle.length > 1) {
+        const artists = [...new Set(sameTitle.map((r) => (r.artist || '').trim()).filter(Boolean))];
+        if (artists.length > 1) return { ambiguous: artists.slice(0, 4) };
+      }
 
       // 与歌单同一套打分：必须歌名命中；禁止 fallback 到 results[0]
       const hit = pickBestTrack(results, q, MIN_SONG_SCORE);

@@ -174,6 +174,11 @@ export default function App() {
     if (/^album:/i.test(q)) {
       return playAlbumForAi(q, { allowGlobal });
     }
+    // 主C：像专辑的请求（专辑字样 / album: / 命中专辑提示表）优先走专辑链路，
+    // 避免同名单曲抢先命中（修 放 Scorpion → 播 Chris Schweizer 的 Scorpion）
+    if (looksLikeAlbumRequest(opts.userText || '', q)) {
+      return playAlbumForAi(q, { allowGlobal });
+    }
     if (!q) {
       playNext();
       return true;
@@ -207,6 +212,15 @@ export default function App() {
       // 3) 全网兜底（容易同名错源；仅 Key 点歌路径）
       if (allowGlobal) {
         const found = await searchAndInsertPlay(q, bind.sessionKey);
+        if (found && 'ambiguous' in found) {
+          // 主C：同名多艺人 → 列出候选让老板选，绝不猜
+          addChatMessage({
+            id: (Date.now() + 2).toString(),
+            role: 'ai',
+            text: `同名歌曲有多个版本：${found.ambiguous.map((a) => `「${q}」by ${a}`).join('，')}。告诉我要谁的，例如「放 ${q} by 谁」。`,
+          });
+          return true;
+        }
         if (found) {
           addChatMessage({
             id: (Date.now() + 2).toString(),
@@ -215,11 +229,6 @@ export default function App() {
           });
           return true;
         }
-      }
-
-      // 4) 单曲失败且像专辑 → A+C
-      if (looksLikeAlbumRequest(opts.userText || '', q)) {
-        return playAlbumForAi(q, { allowGlobal });
       }
 
       addChatMessage({

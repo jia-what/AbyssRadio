@@ -82,8 +82,10 @@ function scoreInterpretation(
     const atks = tokensOf(artistPart);
     if (atks.length) {
       const aHits = atks.filter((t) => artist.includes(norm(t)));
-      if (!aHits.length) bonus -= 35;
-      else bonus += Math.round(28 * (aHits.length / atks.length));
+      // 主C：用户明确给了艺人（by X / X - Y），艺人必须命中，否则直接否决
+      // 不再"扣分了事"——宁可多问一句，绝不猜曲（修 HABIBTI by drake → Ard Adz 错源）
+      if (!aHits.length) return 0;
+      bonus += Math.round(28 * (aHits.length / atks.length));
     }
   }
 
