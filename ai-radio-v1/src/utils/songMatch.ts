@@ -75,6 +75,11 @@ export function extractSongQuery(text: string): string | null {
     return '';
   }
 
+  // 「放首歌/来首歌/听首歌(听一下/听听)」→ 无具体歌名，等于随机播一首
+  if (/^(?:放|来|听|播放)\s*(?:首|一?首)?\s*歌(?:歌|听)?(?:听|一下|吧|呗|啊|呀|哦)*$/i.test(raw)) {
+    return '';
+  }
+
   const stripTail = (q: string) =>
     q
       .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦)+$/u, '')

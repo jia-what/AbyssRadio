@@ -242,12 +242,12 @@ app.get('/api/music/lyric', async function(req, res) {
 
 // DeepSeek AI DJ chat — injects current track (body.track or server player status)
 app.post('/api/chat', express.json(), async function(req, res) {
-  const { message, history, track } = req.body || {};
+  const { message, history, track, loggedIn } = req.body || {};
   if (!message) return res.status(400).json({ error: 'missing message' });
   try {
     const status = getPlayerStatus();
     const nowPlaying = track || status.current || null;
-    const result = await chatWithDeepSeek(message, history || [], nowPlaying);
+    const result = await chatWithDeepSeek(message, history || [], nowPlaying, { loggedIn: !!loggedIn });
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -91,7 +91,7 @@ function buildContextSummary(messageHistory) {
 /**
  * Send a message to DeepSeek and get AI DJ response.
  */
-export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack) {
+export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack, opts = {}) {
   if (!hasDeepseekApiKey()) {
     return {
       type: 'nokey',
@@ -104,11 +104,15 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
   const nowPlaying = currentTrack
     ? `当前正在播放: "${currentTrack.title}" - ${currentTrack.artist}`
     : '当前没有播放任何歌曲';
+  const loginState = opts.loggedIn
+    ? '用户已登录音乐账号（可从歌单点歌）。'
+    : '用户当前未登录音乐账号（无法从歌单点歌）。如果用户问登录状态，如实回答未登录。';
 
   const summary = buildContextSummary(messageHistory);
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'system', content: nowPlaying },
+    { role: 'system', content: loginState },
     ...(summary ? [{ role: 'system', content: summary }] : []),
     ...messageHistory.slice(-16).map(m => ({
       role: m.role === 'ai' ? 'assistant' : 'user',
