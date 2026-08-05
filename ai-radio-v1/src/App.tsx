@@ -72,7 +72,7 @@ export default function App() {
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
-          text: `◉  ${lib.message}（插播）`,
+          text: `◉  ${lib.message}`,
         });
         return true;
       }
@@ -84,8 +84,8 @@ export default function App() {
             id: (Date.now() + 2).toString(),
             role: 'ai',
             text: found.track.fromLibrary
-              ? `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（换成你歌单的版本，插播）`
-              : `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（非歌单源，插播）`,
+              ? `◉  从专辑「${found.album}」抽了一首（你歌单里的版本）— ${found.track.title} by ${found.track.artist}`
+              : `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}`,
           });
           return true;
         }
@@ -102,7 +102,7 @@ export default function App() {
         role: 'ai',
         text: lib.message?.includes('想听哪首')
           ? `◉  ${lib.message}`
-          : `◉  「${album}」更像专辑名，我还不能有把握抽曲。${hint}`,
+          : `◉  「${album}」听起来像一张专辑，我还没把握抽曲。${hint}`,
       });
       return false;
     } catch (e) {
@@ -154,7 +154,7 @@ export default function App() {
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
-          text: `◉  ${lib.message}（插播）`,
+          text: `◉  ${lib.message}`,
         });
         return true;
       }
@@ -167,8 +167,8 @@ export default function App() {
             id: (Date.now() + 2).toString(),
             role: 'ai',
             text: found.fromLibrary
-              ? `◉  歌单里没有 ${artist} 的歌，从全网找到同曲并换成你歌单的版本 — ${found.title} by ${found.artist}（插播）`
-              : `◉  歌单里没有 ${artist} 的歌，从全网抽了一首 — ${found.title} by ${found.artist}（非歌单源，插播）`,
+              ? `◉  歌单里没有 ${artist} 的歌，我全网找到一首（你歌单里的版本）— ${found.title} by ${found.artist}`
+              : `◉  歌单里没有 ${artist} 的歌，我全网找了一首 — ${found.title} by ${found.artist}`,
           });
           return true;
         }
@@ -180,7 +180,7 @@ export default function App() {
         role: 'ai',
         text: allowGlobal
           ? `全网也没找到 ${artist} 的歌 — 平台可能没收录这位歌手。`
-          : `歌单里没有 ${artist} 的歌。导入 DeepSeek Key 后可搜全库。`,
+          : `歌单里没有 ${artist} 的歌。导入 DeepSeek Key 后就能全网找。`,
       });
       return false;
     } catch (e) {
@@ -242,7 +242,7 @@ export default function App() {
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
-          text: `◉  在当前歌单找到了：${queued.title} — ${queued.artist}（插播）`,
+          text: `◉  在当前歌单找到了：${queued.title} — ${queued.artist}`,
         });
         return true;
       }
@@ -254,7 +254,7 @@ export default function App() {
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
-          text: `◉  ${lib.message}（插播，下一首回原歌单）`,
+          text: `◉  ${lib.message}`,
         });
         return true;
       }
@@ -276,8 +276,8 @@ export default function App() {
             id: (Date.now() + 2).toString(),
             role: 'ai',
             text: found.fromLibrary
-              ? `◉  歌单未命中，从全网找到同曲并换成你歌单的版本 — ${found.title} by ${found.artist}（插播）`
-              : `◉  歌单未命中，全网插播 — ${found.title} by ${found.artist}（非歌单源，下一首回原歌单）`,
+              ? `◉  歌单里没有，但找到了你歌单里的版本 — ${found.title} by ${found.artist}`
+              : `◉  歌单里没这首，我全网找了一首 — ${found.title} by ${found.artist}`,
           });
           return true;
         }

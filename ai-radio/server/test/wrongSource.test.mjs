@@ -22,12 +22,14 @@ check('歌名同艺人不同 → 拒绝', !isSameTrack({ title: 'Nonstop', artis
 check('歌名不同 → 拒绝', !isSameTrack({ title: 'Scorpion', artist: 'Drake' }, { title: 'Nonstop', artist: 'Drake' }));
 check('全网带 Explicit 后缀 vs 歌单无 → 换歌单版', isSameTrack({ title: 'HABIBTI', artist: 'Drake' }, { title: 'HABIBTI (Explicit)', artist: 'Drake' }));
 
-console.log('\n=== 消息文案 (App.tsx 静态断言) ===');
+console.log('\n=== 消息文案 (App.tsx 静态断言, 第 12 项产品化) ===');
 const app = (await import('fs')).readFileSync(new URL('../../../ai-radio-v1/src/App.tsx', import.meta.url), 'utf-8');
-check('单曲: 歌单源文案', app.includes('从全网找到同曲并换成你歌单的版本'));
-check('单曲: 非歌单源文案', app.includes('非歌单源，下一首回原歌单'));
-check('专辑: 非歌单源文案', app.includes('非歌单源，插播'));
-check('歌手: 非歌单源文案', app.includes('非歌单源，插播'));
+check('单曲: 歌单源文案', app.includes('但找到了你歌单里的版本'));
+check('单曲: 非歌单源文案', app.includes('我全网找了一首'));
+check('专辑: 非歌单源文案', app.includes('从专辑「'));
+check('歌手: 非歌单源文案', app.includes('我全网找了一首'));
+check('技术腔「插播」已去除', !app.includes('（插播）'));
+check('技术腔「非歌单源」已去除', !app.includes('非歌单源'));
 
 console.log('\n=== useRadioState 静态断言 ===');
 const urs = (await import('fs')).readFileSync(new URL('../../../ai-radio-v1/src/hooks/useRadioState.ts', import.meta.url), 'utf-8');

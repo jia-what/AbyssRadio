@@ -358,7 +358,7 @@ export async function searchLibrary(sessionKey, query) {
     return {
       track: null,
       matches: [],
-      message: `歌单里没找到「${q}」。配 DeepSeek Key 可搜全库，或先把歌加进歌单。`,
+      message: `歌单里没找到「${q}」。导入 DeepSeek Key 后我能全网找，或先把歌加进歌单。`,
     };
   }
   const track = ranked[0];
@@ -435,7 +435,7 @@ export async function searchLibraryAlbum(sessionKey, query) {
     matches: [],
     suggestions: [],
     clarify: true,
-    message: `歌单里没找到专辑${label}的曲目${scanWarn}。可以说具体歌名，或配 Key 后让我全网抽一首。`,
+    message: `歌单里没找到专辑${label}的曲目${scanWarn}。可以说具体歌名，或导入 Key 后让我全网找。`,
   };
 }
 
@@ -489,6 +489,6 @@ export async function searchLibraryArtist(sessionKey, query) {
     track: null,
     matches: [],
     clarify: true,
-    message: `歌单里没有 ${artist} 的歌${scanWarn}。可以说具体歌名，或配 Key 后让我全网抽一首。`,
+    message: `歌单里没有 ${artist} 的歌${scanWarn}。可以说具体歌名，或导入 Key 后让我全网找。`,
   };
 }
