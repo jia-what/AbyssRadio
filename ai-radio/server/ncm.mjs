@@ -51,7 +51,9 @@ function parseResponse(data) {
       id: String(s.id || s.hash || s.songid || ''),
       title: s.name || s.title || s.songname || s.filename || '',
       artist: artistName || s.singername || '',
-      cover: coverUrl || s.cover || s.pic_big || s.pic_small || '',
+      // 酷狗搜索结果不含封面字段：用 hash 拼标准封面 URL 兜底（实测 imge.kugou.com/stdmusic/{hash}.jpg 有效）
+      cover: coverUrl || s.cover || s.pic_big || s.pic_small
+        || (s.hash ? `https://imge.kugou.com/stdmusic/${s.hash}.jpg` : ''),
       duration: s.duration ? Math.round(typeof s.duration === 'string' ? parseInt(s.duration) : s.duration) : s.dt ? s.dt / 1000 : (s.duration || 0),
       album: (s.album && (s.album.name || s.album)) || s.al?.name || s.albumname || s.album_name || s.albumName || '',
       source: '',
