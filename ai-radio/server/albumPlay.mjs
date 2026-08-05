@@ -157,10 +157,14 @@ export function albumClarifySuggestions(album, artist) {
  */
 export function parseArtistQuery(raw) {
   let q = String(raw || '').trim();
-  q = q.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
+  q = q.replace(/^(?:play|播放|放|听|点歌|换一首|换)\s*/i, '').trim();
   q = q.replace(/^artist:\s*/i, '').trim();
   // 去「的歌 / 的歌儿 / 唱的歌」等口语尾巴
   q = q.replace(/(?:的|之)歌(?:儿)?$/, '').trim();
+  // 「盆栽其他的歌」→ 剥「其他的」→ 盆栽；「其他他的歌」→ 剥「他的」→「其他」→ 空（与前端对齐）
+  q = q.replace(/(?:其他的|别的|另外的|其他的歌|别的歌|另外的歌|另外)?$/, '').trim();
+  q = q.replace(/(?:他|她|它)的?$/, '').trim();
+  q = q.replace(/^(?:其他|别的|另外)$/, '').trim();
   q = q.replace(/^(?:来一首|来点|来|放|听)\s*/i, '').trim();
   return { artist: q, raw: String(raw || '').trim() };
 }

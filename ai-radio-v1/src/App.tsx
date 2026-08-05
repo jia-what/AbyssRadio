@@ -136,7 +136,21 @@ export default function App() {
 
     const q = String(query || '').replace(/^artist:\s*/i, '').trim();
     if (!q) return false;
-    const { artist } = parseArtistQuery(q);
+    let { artist } = parseArtistQuery(q);
+    // 「换一首他/她的歌」「其他他的歌」→ 代词，取当前播放曲目的歌手（没有就老实说）
+    if (!artist || /^(?:他|她|它|他们|她们|这|那)$/.test(artist)) {
+      const cur = currentTrack?.artist;
+      if (cur) {
+        artist = cur;
+      } else {
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: '现在没有在放任何歌，「他」指谁呢？可以点名说「放 XX 的歌」。',
+        });
+        return false;
+      }
+    }
     if (!artist) {
       addChatMessage({
         id: (Date.now() + 2).toString(),

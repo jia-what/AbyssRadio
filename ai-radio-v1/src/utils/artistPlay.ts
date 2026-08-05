@@ -16,19 +16,25 @@ function norm(s: unknown): string {
  */
 export function parseArtistQuery(raw: unknown): { artist: string; raw: string } {
   let q = String(raw || '').trim();
-  q = q.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
+  q = q.replace(/^(?:play|播放|放|听|点歌|换一首|换)\s*/i, '').trim();
   q = q.replace(/^artist:\s*/i, '').trim();
   // 去「的歌 / 的歌儿 / 唱的歌」等口语尾巴
   q = q.replace(/(?:的|之)歌(?:儿)?$/, '').trim();
+  // 「盆栽其他的歌」→ 剥「其他的」→ 盆栽；「其他他的歌」→ 剥「他的」→「其他」→ 剥「其他」→ 空(取当前歌手)
+  q = q.replace(/(?:其他的|别的|另外的|其他的歌|别的歌|另外的歌|另外)?$/, '').trim();
+  q = q.replace(/(?:他|她|它)的?$/, '').trim();
+  q = q.replace(/^(?:其他|别的|另外)$/, '').trim();
   q = q.replace(/^(?:来一首|来点|来|放|听)\s*/i, '').trim();
   return { artist: q, raw: String(raw || '').trim() };
 }
 
-/** 像不像艺人级请求：artist: 前缀 / 「的歌」「的歌儿」「的歌」「听某人的歌」 */
+/** 像不像艺人级请求：artist: 前缀 / 「的歌」「的歌儿」「的歌」「听某人的歌」/ 换一首(他|其他)的歌 */
 export function looksLikeArtistRequest(text: string, query: string): boolean {
   if (/^artist:/i.test(query)) return true;
   const t = String(text || '');
   if (/的歌(?:儿)?$|的歌儿|来点|来一首.*的/.test(t)) return true;
+  // 「换一首(他|他|其他|别的)的歌」→ 歌手级（当前歌手的另一首）
+  if (/换(?:一?首)?.*(?:他|她|其他|别的|另外).*歌/.test(t)) return true;
   return false;
 }
 
