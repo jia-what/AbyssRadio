@@ -88,7 +88,14 @@ export default function SignalColumn({
 
   useEffect(() => {
     void fetchDeepseekStatus()
-      .then((s) => setKeyConfigured(s.configured))
+      .then((s) => {
+        setKeyConfigured(s.configured);
+        // 第 16 项：首启无 Key → 自动弹引导（只弹一次，用户关掉或导入后不再打扰）
+        if (!s.configured && !localStorage.getItem('abyss.key.asked')) {
+          localStorage.setItem('abyss.key.asked', '1');
+          setKeyOpen(true);
+        }
+      })
       .catch(() => setKeyConfigured(false));
   }, [visible]);
 
