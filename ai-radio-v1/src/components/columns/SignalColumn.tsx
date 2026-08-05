@@ -90,11 +90,8 @@ export default function SignalColumn({
     void fetchDeepseekStatus()
       .then((s) => {
         setKeyConfigured(s.configured);
-        // 第 16 项：首启无 Key → 自动弹引导（只弹一次，用户关掉或导入后不再打扰）
-        if (!s.configured && !localStorage.getItem('abyss.key.asked')) {
-          localStorage.setItem('abyss.key.asked', '1');
-          setKeyOpen(true);
-        }
+        // 热修复(2026-08-05): 不再自动弹 Key 引导——全屏遮罩会挡住右侧扫码栏
+        // (二维码刷新不出来的根因)。改为用户主动点「导入 Key」按钮才弹。
       })
       .catch(() => setKeyConfigured(false));
   }, [visible]);
