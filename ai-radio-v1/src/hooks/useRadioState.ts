@@ -3,7 +3,7 @@ import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
 import { searchLibrary } from '../services/aiSettingsApi';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
-import { pickBestTrack, parseSongQuery, MIN_SONG_SCORE } from '../utils/songMatch';
+import { pickBestTrack, parseSongQuery, MIN_SONG_SCORE, expandAliases } from '../utils/songMatch';
 import { parseAlbumQuery, pickAlbumTrack } from '../utils/albumPlay';
 import { parseArtistQuery, pickArtistTrack } from '../utils/artistPlay';
 
@@ -611,7 +611,10 @@ export function useRadioState() {
     sessionKey?: string,
   ): Promise<Track | null> => {
     try {
-      const { artist } = parseArtistQuery(artistQuery);
+      // 第 5 项：别名/译名展开（「公鸭」→ drake）— 取展开后的候选（最后一个是替换后）
+      const cands = expandAliases(artistQuery);
+      const expanded = cands.length > 1 ? cands[cands.length - 1] : cands[0];
+      const { artist } = parseArtistQuery(expanded);
       if (!artist) return null;
       const results = await searchMusic(artist, 'both', 16);
       if (!results?.length) return null;

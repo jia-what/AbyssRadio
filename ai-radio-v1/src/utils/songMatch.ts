@@ -10,12 +10,56 @@ const STOP = new Set([
 
 export const MIN_SONG_SCORE = 50;
 
+/** 常见别名/译名 → 标准写法（查询时展开成候选，取最高分；第 5 项） */
+const ALIAS_MAP: Record<string, string> = {
+  // 歌手中文昵称
+  '公鸭': 'drake',
+  '比伯': 'justin bieber',
+  '盆栽': 'the weeknd',
+  '姆爷': 'eminem',
+  '侃爷': 'kanye west',
+  '霉霉': 'taylor swift',
+  '碧昂丝': 'beyonce',
+  '阿黛尔': 'adele',
+  '日日': 'rihanna',
+  '喇嘛': 'kendrick lamar',
+  '盆栽哥': 'the weeknd',
+  '黄老板': 'ed sheeran',
+  '萌德': 'shawn mendes',
+  '断眉': 'charlie puth',
+  // 歌名常见译名
+  '我心永恒': 'my heart will go on',
+  '加州旅馆': 'hotel california',
+  '昨日重现': 'yesterday once more',
+  '加州梦': 'california dreamin',
+  '卡农': 'canon in d',
+  '致爱丽丝': 'fur elise',
+  '月光奏鸣曲': 'moonlight sonata',
+  '雨中的旋律': 'rhythm of the rain',
+  // 常见写法变体
+  'gods plan': "god's plan",
+};
+
 function norm(s: string): string {
   return String(s || '')
     .toLowerCase()
     .replace(/[（(].*?[）)]/g, ' ')
+    .replace(/\s*(?:feat|ft|featuring)\.?\s+/gi, ' ')
     .replace(/[^\p{L}\p{N}]+/gu, '')
     .trim();
+}
+
+/** 别名展开：返回候选查询列表（原始 + 命中别名替换后的写法），供打分取最高 */
+export function expandAliases(query: string): string[] {
+  const raw = String(query || '').trim();
+  const cands = [raw];
+  const low = raw.toLowerCase();
+  for (const [alias, std] of Object.entries(ALIAS_MAP)) {
+    if (low.includes(alias)) {
+      cands.push(raw.replace(new RegExp(alias, 'gi'), std));
+    }
+  }
+  return [...new Set(cands)];
 }
 
 function tokensOf(s: string): string[] {
@@ -88,7 +132,9 @@ function scoreInterpretation(
   if (artistPart) {
     const atks = tokensOf(artistPart);
     if (atks.length) {
-      const aHits = atks.filter((t) => artist.includes(norm(t)));
+      // 主C：艺人匹配也词级（修 "go on" 拆词 → "Celine DiON" 子串白送分）
+      const aTks = tokensOf(track.artist || '').map((x) => norm(x));
+      const aHits = atks.filter((t) => aTks.includes(norm(t)));
       // 主C：用户明确给了艺人（by X / X - Y），艺人必须命中，否则直接否决
       // 不再"扣分了事"——宁可多问一句，绝不猜曲（修 HABIBTI by drake → Ard Adz 错源）
       if (!aHits.length) return 0;
@@ -105,6 +151,19 @@ function scoreInterpretation(
 }
 
 export function scoreTrack(
+  track: { title?: string; artist?: string },
+  query: string,
+): number {
+  // 第 5 项：别名/译名展开成候选，取最高分（如「公鸭」→ drake、「我心永恒」→ my heart will go on）
+  let best = 0;
+  for (const cand of expandAliases(query)) {
+    const s = scoreTrackRaw(track, cand);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
+function scoreTrackRaw(
   track: { title?: string; artist?: string },
   query: string,
 ): number {
