@@ -330,6 +330,12 @@ export default function App() {
         });
         return;
       }
+      // 第 11 项：先给即时反馈（首次扫库可能几秒），再执行
+      addChatMessage({
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: `正在翻你的歌单，找「${localQ}」...`,
+      });
       void playSongForAi(localQ, { allowGlobal, userText: text });
       return;
     }

@@ -10,6 +10,7 @@ import {
 import CoverThumb from '../ui/CoverThumb';
 import TiltedCard from '../ui/TiltedCard';
 import PressSpring from '../ui/PressSpring';
+import { searchLibrary } from '../../services/aiSettingsApi';
 import type { StackCardState } from './SpatialStack';
 import OptionWheelStack from './OptionWheelStack';
 
@@ -124,6 +125,10 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
             saveStoredBind(result.platform, result.key, result.user);
             setView('playlists');
             await loadPlaylists(result.key);
+            // 第 11 项：登录后后台预热扫库，首次点歌不用等
+            void searchLibrary(result.key, '').then(() => {
+              console.log('[abyss] library warm-up done');
+            }).catch(() => { /* 预热失败不影响使用 */ });
           } else if (code === 800 && !loggedInRef.current) {
             stopQrPoll();
             setError('二维码已过期，请点击下方刷新');
