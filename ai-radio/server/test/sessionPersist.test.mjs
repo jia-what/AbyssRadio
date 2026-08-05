@@ -38,8 +38,9 @@ check('deleteSession 后内存删除', !getSession(key));
 
 console.log('\n=== 前端恢复逻辑 (PlaylistColumn 静态断言) ===');
 const plc = fs.readFileSync(new URL('../../../ai-radio-v1/src/components/columns/PlaylistColumn.tsx', import.meta.url), 'utf-8');
-check('恢复失败不再调 clearStoredBind()', !plc.includes('catch {\n        clearStoredBind();') && !plc.includes('catch {\r\n        clearStoredBind();'));
-check('恢复失败保留 bind 记忆', plc.includes('后端 session 已落盘，重试即可恢复'));
+check('恢复失败清 bind (重新扫码)', plc.includes('clearStoredBind();') && plc.includes('setBind(null);'));
+check('恢复失败提示重新扫码', plc.includes('登录已过期，请重新扫码登录'));
+check('不清 bind 会杀扫码轮询的注释', plc.includes('bind 非空会触发 useEffect 停掉扫码轮询'));
 
 console.log('\n=== 前端传登录状态 (App.tsx 静态断言) ===');
 const app = fs.readFileSync(new URL('../../../ai-radio-v1/src/App.tsx', import.meta.url), 'utf-8');

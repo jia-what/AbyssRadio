@@ -182,13 +182,11 @@ export default function PlaylistColumn({ visible, focused = false, onPlayPlaylis
         setPlActive(0);
         setView('playlists');
       } catch {
-        // 热修复：恢复失败不再清 localStorage（后端 session 已落盘，重试即可恢复）。
-        // 只保留 bind 记忆，让用户看到已登录但歌单加载失败可重试。
-        setBind({
-          key: stored.sessionKey,
-          platform: stored.platform,
-          user: stored.user || { userId: '', nickname: '已登录' },
-        });
+        // 热修复：恢复失败 = 会话真正失效，清掉 bind 让用户重新扫码。
+        // （不能 setBind 记忆——bind 非空会触发 useEffect 停掉扫码轮询，导致扫码无反应）
+        clearStoredBind();
+        setBind(null);
+        setError('登录已过期，请重新扫码登录');
       }
     })();
   }, []);
