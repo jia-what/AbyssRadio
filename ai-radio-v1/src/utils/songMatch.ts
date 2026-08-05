@@ -27,6 +27,7 @@ const ALIAS_MAP: Record<string, string> = {
   '黄老板': 'ed sheeran',
   '萌德': 'shawn mendes',
   '断眉': 'charlie puth',
+  '火星哥': 'bruno mars',
   // 歌名常见译名
   '我心永恒': 'my heart will go on',
   '加州旅馆': 'hotel california',
@@ -89,7 +90,7 @@ export function extractSongQuery(text: string): string | null {
   // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
   // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
   const head = raw.match(
-    /^(?:play\s+|播放|放(?:一?首)?|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
+    /^(?:play\s+|播放|放(?:一?首)?|来(?:首|一首|点)|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
   );
   if (head) {
     const q = stripTail(head[1]);
@@ -122,7 +123,7 @@ export function parseSongQuery(query: string): {
   raw: string;
 } {
   let raw = String(query || '').trim();
-  raw = raw.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
+  raw = raw.replace(/^(?:play|播放|放|来首|来一首|来点|听|点歌)\s+/i, '').trim();
   let titlePart = raw;
   let artistPart = '';
   const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
@@ -136,8 +137,8 @@ export function parseSongQuery(query: string): {
       artistPart = dash[2].trim();
     } else {
       // 中文口语: "公鸭的 passionfruit" / "Drake的 Nonstop" → title=后, artist=前 (第5项别名场景)
-      // 注意: 只拆「的」后有空格/英文的 (drake 的 Nonstop), 不拆中文歌名里的「的」(我们的时光)
-      const cnMid = raw.match(/^(.+?)的\s+([A-Za-z0-9][\w .'-]*)$/u);
+      // 注意: 只拆「的」后是英文/数字的 (drake的 Nonstop / 火星哥的talking to the moon), 不拆中文歌名里的「的」(我们的时光)
+      const cnMid = raw.match(/^(.+?)的\s*([A-Za-z0-9][\w .'-]*)$/u);
       if (cnMid) {
         titlePart = cnMid[2].trim();
         artistPart = cnMid[1].trim();

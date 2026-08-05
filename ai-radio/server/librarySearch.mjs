@@ -47,6 +47,7 @@ const ALIAS_MAP = {
   '黄老板': 'ed sheeran',
   '萌德': 'shawn mendes',
   '断眉': 'charlie puth',
+  '火星哥': 'bruno mars',
   // 歌名常见译名
   '我心永恒': 'my heart will go on',
   '加州旅馆': 'hotel california',
@@ -96,7 +97,7 @@ function tokensOf(s) {
  */
 export function parseSongQuery(query) {
   let raw = String(query || '').trim();
-  raw = raw.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
+  raw = raw.replace(/^(?:play|播放|放|来首|来一首|来点|听|点歌)\s+/i, '').trim();
   let titlePart = raw;
   let artistPart = '';
   const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
@@ -109,8 +110,8 @@ export function parseSongQuery(query) {
       titlePart = dash[1].trim();
       artistPart = dash[2].trim();
     } else {
-      // 中文口语: "公鸭的 passionfruit" / "Drake的 Nonstop" → title=后, artist=前 (与前端对齐)
-      const cnMid = raw.match(/^(.+?)的\s+([A-Za-z0-9][\w .'-]*)$/u);
+      // 中文口语: "公鸭的 passionfruit" / "火星哥的talking to the moon" → title=后, artist=前 (与前端对齐)
+      const cnMid = raw.match(/^(.+?)的\s*([A-Za-z0-9][\w .'-]*)$/u);
       if (cnMid) {
         titlePart = cnMid[2].trim();
         artistPart = cnMid[1].trim();
