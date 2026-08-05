@@ -62,6 +62,46 @@ export function expandAliases(query: string): string[] {
   return [...new Set(cands)];
 }
 
+/**
+ * 前端本地解析点歌意图（第 6 项）：命中返回搜索词（'' = 纯切歌），未命中返回 null。
+ * 模型只聊纯聊天——点歌不再依赖模型输出 PLAY: 指令。
+ */
+export function extractSongQuery(text: string): string | null {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  // 纯切歌，无搜索词
+  if (/^(?:换一首|换歌|下一首|换一下|随便来一首|来一首|随便放一首)$/i.test(raw)) {
+    return '';
+  }
+
+  const stripTail = (q: string) =>
+    q
+      .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦)+$/u, '')
+      .replace(/[。！？.!?]+$/g, '')
+      .trim();
+
+  // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
+  // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
+  const head = raw.match(
+    /^(?:play\s+|播放|放(?:一?首)?|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
+  );
+  if (head) {
+    const q = stripTail(head[1]);
+    // 「放」单独不成点歌；「放一首」无歌名 → 空=切歌
+    return q;
+  }
+
+  const cleanMatch = raw.match(/换(?:一首)?(.+?)(?:歌|听听)?$/);
+  if (cleanMatch && cleanMatch[1].trim()) return stripTail(cleanMatch[1]);
+
+  // 句中点歌：「帮我放一首 X」
+  const mid = raw.match(/(?:帮我|给我|请)?放(?:一?首)(.+)$/i);
+  if (mid) return stripTail(mid[1]);
+
+  return null;
+}
+
 function tokensOf(s: string): string[] {
   return String(s || '')
     .toLowerCase()

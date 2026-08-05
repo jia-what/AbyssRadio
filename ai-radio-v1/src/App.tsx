@@ -11,46 +11,10 @@ import { useRadioState } from './hooks/useRadioState';
 import { useParticleCamera } from './hooks/useParticleCamera';
 import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
 import { loadStoredBind } from './services/playlistApi';
-import { searchLibrary } from './services/aiSettingsApi';
+import { searchLibrary, fetchDeepseekStatus } from './services/aiSettingsApi';
 import { albumClarifySuggestions, findAlbumHint, parseAlbumQuery } from './utils/albumPlay';
-import { parseSongQuery } from './utils/songMatch';
+import { parseSongQuery, extractSongQuery } from './utils/songMatch';
 import { looksLikeArtistRequest, parseArtistQuery } from './utils/artistPlay';
-
-function extractSongQuery(text: string): string | null {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-
-  // 纯切歌，无搜索词
-  if (/^(?:换一首|换歌|下一首|换一下|随便来一首|来一首|随便放一首)$/i.test(raw)) {
-    return '';
-  }
-
-  const stripTail = (q: string) =>
-    q
-      .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦)+$/u, '')
-      .replace(/[。！？.!?]+$/g, '')
-      .trim();
-
-  // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
-  // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
-  const head = raw.match(
-    /^(?:play\s+|放(?:一?首)?|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
-  );
-  if (head) {
-    const q = stripTail(head[1]);
-    // 「放」单独不成点歌；「放一首」无歌名 → 空=切歌
-    return q;
-  }
-
-  const cleanMatch = raw.match(/换(?:一首)?(.+?)(?:歌|听听)?$/);
-  if (cleanMatch && cleanMatch[1].trim()) return stripTail(cleanMatch[1]);
-
-  // 句中点歌：「帮我放一首 X」
-  const mid = raw.match(/(?:帮我|给我|请)?放(?:一?首)(.+)$/i);
-  if (mid) return stripTail(mid[1]);
-
-  return null;
-}
 
 /** 用户话里是否像在点专辑 */
 function looksLikeAlbumRequest(text: string, query: string): boolean {
@@ -344,6 +308,31 @@ export default function App() {
 
   const handleSend = async (text: string) => {
     addChatMessage({ id: Date.now().toString(), role: 'user', text });
+
+    // 第 6 项：前端强制本地解析点歌意图，命中即本地执行，模型只聊纯聊天
+    // （修 模型漏写/乱写 PLAY:、闲聊误触发）
+    const localQ = extractSongQuery(text);
+    if (localQ !== null) {
+      let allowGlobal = false;
+      try {
+        const st = await fetchDeepseekStatus();
+        allowGlobal = st.configured;
+      } catch {
+        allowGlobal = false;
+      }
+      if (localQ === '') {
+        // 纯切歌（换一首 / 随便来一首）
+        playNext();
+        addChatMessage({
+          id: (Date.now() + 1).toString(),
+          role: 'ai',
+          text: '换一首，让思绪随节奏沉入深海。',
+        });
+        return;
+      }
+      void playSongForAi(localQ, { allowGlobal, userText: text });
+      return;
+    }
 
     try {
       const res = await fetch('/api/chat', {
