@@ -348,7 +348,7 @@ export default function App() {
           message: text,
           history: messages.slice(-20),
           track: currentTrack,
-          loggedIn: !!loadStoredBind()?.sessionKey,
+          sessionKey: loadStoredBind()?.sessionKey || '',
         }),
       });
 

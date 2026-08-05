@@ -43,13 +43,17 @@ check('恢复失败保留 bind 记忆', plc.includes('后端 session 已落盘�
 
 console.log('\n=== 前端传登录状态 (App.tsx 静态断言) ===');
 const app = fs.readFileSync(new URL('../../../ai-radio-v1/src/App.tsx', import.meta.url), 'utf-8');
-check('chat 请求带 loggedIn', app.includes('loggedIn: !!loadStoredBind()?.sessionKey'));
+check('chat 请求带 sessionKey', app.includes('sessionKey: loadStoredBind()?.sessionKey || \'\''));
 
 console.log('\n=== 后端登录状态注入 (deepseek.mjs 静态断言) ===');
 const ds = fs.readFileSync(new URL('../deepseek.mjs', import.meta.url), 'utf-8');
 check('chatWithDeepSeek 收 opts', ds.includes('opts = {}'));
 check('loginState 注入 system', ds.includes('loginState') && ds.includes('用户已登录音乐账号'));
 check('未登录如实回答', ds.includes('如实回答未登录'));
+
+console.log('\n=== 后端 session 真实校验 (index.mjs 静态断言) ===');
+const idx2 = fs.readFileSync(new URL('../index.mjs', import.meta.url), 'utf-8');
+check('chat 用 getSession 验证', idx2.includes('const session = sessionKey ? getSession(sessionKey) : null'));
 
 console.log(`\n结果: ${pass} 过, ${fail} 挂`);
 process.exit(fail ? 1 : 0);

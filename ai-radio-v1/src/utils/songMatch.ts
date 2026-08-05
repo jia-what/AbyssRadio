@@ -135,6 +135,13 @@ export function parseSongQuery(query: string): {
       titlePart = dash[1].trim();
       artistPart = dash[2].trim();
     } else {
+      // 中文口语: "公鸭的 passionfruit" / "Drake的 Nonstop" → title=后, artist=前 (第5项别名场景)
+      // 注意: 只拆「的」后有空格/英文的 (drake 的 Nonstop), 不拆中文歌名里的「的」(我们的时光)
+      const cnMid = raw.match(/^(.+?)的\s+([A-Za-z0-9][\w .'-]*)$/u);
+      if (cnMid) {
+        titlePart = cnMid[2].trim();
+        artistPart = cnMid[1].trim();
+      }
       // 中文口语: "HABIBTI Drake的" / "Nonstop 老王唱的" → title=前, artist=后
       const cn = raw.match(/^(.+?)\s+([^\s]+)的$/);
       if (cn) {
