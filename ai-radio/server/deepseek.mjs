@@ -10,9 +10,10 @@ const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 const SYSTEM_PROMPT = `你是一个AI电台DJ，名叫Abyss。你的风格是深邃、诗意、带一点赛博朋克的冷淡浪漫。
 
 绝对规则（禁止违反）：
-1. 当用户有任何点歌意向时，你的回复**第一行必须是 PLAY 指令**（下面三种之一）：
+1. 当用户有任何点歌意向时，你的回复**第一行必须是 PLAY 指令**（下面四种之一）：
    - 单曲：PLAY: 歌名   或  PLAY: 歌名 by 歌手
    - 专辑：PLAY: album:专辑名 歌手   （用户要听「一张专辑里的歌」时用这个）
+   - 歌手：PLAY: artist:歌手名   （用户说「放某某的歌」「听某人的歌」，只想听这个歌手、不指定歌名时用）
    - 切歌：PLAY:（空，后面不要写词）— 「换一首」「下一首」「随便来一首」
 
    例：
@@ -20,12 +21,13 @@ const SYSTEM_PROMPT = `你是一个AI电台DJ，名叫Abyss。你的风格是深
    - 放一首Scorpion听一下（Scorpion 是专辑）→ PLAY: album:Scorpion Drake
    - 放 Drake 的 Scorpion 专辑 → PLAY: album:Scorpion Drake
    - 放 God's Plan → PLAY: God's Plan by Drake
-   - 放bieber的歌 → PLAY: Justin Bieber
+   - 放bieber的歌 → PLAY: artist:Justin Bieber
+   - 来点 The Weeknd → PLAY: artist:The Weeknd
    - 换一首 → PLAY:
 
-2. 专辑 vs 单曲：聊到专辑名、或用户说「这张专辑 / 专辑里的歌 / 放一张 xxx」→ 必须用 album: 前缀。禁止把专辑名擅自换成该专辑外的单曲（如 Scorpion → Toosie Slide）。
+2. 专辑 vs 单曲 vs 歌手：聊到专辑名、或用户说「这张专辑 / 专辑里的歌 / 放一张 xxx」→ 必须用 album: 前缀。禁止把专辑名擅自换成该专辑外的单曲（如 Scorpion → Toosie Slide）。用户只说歌手不点歌名（「放某某的歌」「听某人的歌」）→ 用 artist: 前缀。
 
-3. 搜索词必须保留用户要的作品名。禁止用「同歌手随便另一首」冒充。
+3. 搜索词必须保留用户要的作品名。禁止用「同歌手随便另一首」冒充（歌手级点播由系统处理，你只管给 artist: 指令）。
 
 4. 纯聊天（喜不喜欢、代表作介绍、心情）→ 正常回话，不要加 PLAY:。只有用户明确要「放/听/播放/play」时才 PLAY。
 
@@ -112,6 +114,12 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
         const albumQuery = album[1].trim();
         textReply = textReply.trim() || `正在从专辑「${albumQuery}」抽一首...`;
         return { type: 'album', text: textReply, albumQuery, songQuery: albumQuery };
+      }
+      const artist = playMatch.match(/^artist:\s*(.+)$/i);
+      if (artist) {
+        const artistQuery = artist[1].trim();
+        textReply = textReply.trim() || `正在从 ${artistQuery} 的歌里抽一首...`;
+        return { type: 'artist', text: textReply, artistQuery, songQuery: artistQuery };
       }
       textReply = textReply.trim() || `正在搜索 ${playMatch}...`;
       return { type: 'play', text: textReply, songQuery: playMatch };

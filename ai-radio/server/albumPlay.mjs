@@ -147,3 +147,50 @@ export function albumClarifySuggestions(album, artist) {
   if (hint?.tracks?.length) return hint.tracks.slice(0, 4);
   return [];
 }
+
+// ============================================================
+// Artist-level matching (第 2 项：歌手级点播)
+// ============================================================
+
+/**
+ * 解析艺人请求: "drake" / "drake 的歌" / "artist:drake" → { artist }
+ */
+export function parseArtistQuery(raw) {
+  let q = String(raw || '').trim();
+  q = q.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
+  q = q.replace(/^artist:\s*/i, '').trim();
+  // 去「的歌 / 的歌儿 / 唱的歌」等口语尾巴
+  q = q.replace(/(?:的|之)歌(?:儿)?$/, '').trim();
+  q = q.replace(/^(?:来一首|来点|来|放|听)\s*/i, '').trim();
+  return { artist: q, raw: String(raw || '').trim() };
+}
+
+/**
+ * 艺人匹配打分: 艺人必须命中 (norm 后包含/被包含), 否则 0 分直接否决。
+ * 与 songMatch 主C 一致：绝不拿无关艺人凑。
+ */
+export function trackMatchesArtist(track, artist) {
+  const aN = normAlbum(artist);
+  if (!aN) return { score: 0 };
+  const tArtist = normAlbum(track.artist || '');
+  const tTitle = normAlbum(track.title || '');
+  if (!tArtist) return { score: 0 };
+  const artistHit = tArtist.includes(aN) || aN.includes(tArtist);
+  if (!artistHit) return { score: 0 };
+  // 艺人命中即算数；封面/翻唱/伴奏降权，避免抽到劣质版本
+  let score = 100;
+  const blob = `${track.title || ''} ${track.artist || ''}`.toLowerCase();
+  if (/翻唱|cover|piano|ringtone|karaoke|伴奏|remix|live|现场/.test(blob)) score -= 40;
+  // 纯伴奏/纯音乐无歌词的标题弱信号降权
+  if (/^[^\p{L}\p{N}]*$/.test(tTitle) && tTitle.length < 6) score -= 20;
+  return { score };
+}
+
+/** 歌单/全网候选里按艺人随机抽一首 (主C：只抽艺人命中的) */
+export function pickArtistTrack(tracks, artist) {
+  const ranked = (tracks || [])
+    .map((t) => ({ t, ...trackMatchesArtist(t, artist) }))
+    .filter((x) => x.score >= 80);
+  if (!ranked.length) return null;
+  return ranked[Math.floor(Math.random() * ranked.length)].t;
+}

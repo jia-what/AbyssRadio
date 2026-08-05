@@ -57,7 +57,7 @@ export interface LibrarySearchResult {
 export async function searchLibrary(
   sessionKey: string,
   query: string,
-  mode: 'song' | 'album' = 'song',
+  mode: 'song' | 'album' | 'artist' = 'song',
 ): Promise<LibrarySearchResult> {
   const res = await fetch('/api/library/search', {
     method: 'POST',

@@ -4,6 +4,7 @@ import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../s
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 import { pickBestTrack, parseSongQuery, MIN_SONG_SCORE } from '../utils/songMatch';
 import { parseAlbumQuery, pickAlbumTrack } from '../utils/albumPlay';
+import { parseArtistQuery, pickArtistTrack } from '../utils/artistPlay';
 
 function searchResultToTrack(s: SearchResult): Track {
   return {
@@ -578,6 +579,31 @@ export function useRadioState() {
     }
   }, [insertAndPlay]);
 
+  /** 歌手级全网抽曲：搜歌手名，结果艺人必须命中，随机抽一首；无把握返回 null */
+  const searchAndInsertArtist = useCallback(async (
+    artistQuery: string,
+    sessionKey?: string,
+  ): Promise<Track | null> => {
+    try {
+      const { artist } = parseArtistQuery(artistQuery);
+      if (!artist) return null;
+      const results = await searchMusic(artist, 'both', 16);
+      if (!results?.length) return null;
+      const chosen = pickArtistTrack(results, artist);
+      if (!chosen) return null;
+      return insertAndPlay({
+        id: chosen.id,
+        title: chosen.title,
+        artist: chosen.artist || '',
+        cover: chosen.cover || '',
+        duration: chosen.duration || 200,
+        source: chosen.source || 'netease',
+      }, sessionKey);
+    } catch {
+      return null;
+    }
+  }, [insertAndPlay]);
+
   // ===== Play a real playlist in order (queue = the playlist itself) =====
   const playPlaylist = useCallback((
     tracks: { id: string; title: string; artist: string; cover: string; duration: number; source: string }[],
@@ -667,7 +693,7 @@ export function useRadioState() {
     pulseAnalyserRef,
     beatAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
-    requestSong, searchAndPlay, searchAndInsertPlay, searchAndInsertAlbum, insertAndPlay, findInQueue, playPlaylist,
+    requestSong, searchAndPlay, searchAndInsertPlay, searchAndInsertAlbum, searchAndInsertArtist, insertAndPlay, findInQueue, playPlaylist,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),
     endPortal: () => setIsPortaling(false),
   };

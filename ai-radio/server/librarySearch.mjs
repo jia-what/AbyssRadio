@@ -10,6 +10,8 @@ import {
   pickAlbumTrack,
   albumClarifySuggestions,
   trackMatchesAlbum,
+  parseArtistQuery,
+  pickArtistTrack,
 } from './albumPlay.mjs';
 
 const cache = new Map(); // key -> { at, tracks }
@@ -352,5 +354,51 @@ export async function searchLibraryAlbum(sessionKey, query) {
     suggestions: [],
     clarify: true,
     message: `歌单里没找到专辑${label}的曲目。可以说具体歌名，或配 Key 后让我全网抽一首。`,
+  };
+}
+
+/**
+ * Artist intent: 歌单里按艺人随机抽一首 (主C：艺人必须命中)。
+ * @returns {{ track, matches, message, clarify }}
+ */
+export async function searchLibraryArtist(sessionKey, query) {
+  if (!sessionKey) {
+    return {
+      track: null, matches: [], clarify: true,
+      message: '请先在右侧扫码登录，才能在歌单里点歌。',
+    };
+  }
+  if (!getSession(sessionKey)) {
+    return {
+      track: null, matches: [], clarify: true,
+      message: '会话已失效，请重新扫码登录。',
+    };
+  }
+
+  const { artist, raw } = parseArtistQuery(query);
+  if (!artist) {
+    return {
+      track: null, matches: [], clarify: true,
+      message: '没听清要听谁的歌，再说一次？',
+    };
+  }
+
+  const scanKey = `artist:${raw}`;
+  const tracks = await loadLibraryTracks(sessionKey, scanKey);
+  const picked = pickArtistTrack(tracks, artist);
+  if (picked) {
+    return {
+      track: picked,
+      matches: [picked],
+      clarify: false,
+      message: `从你的歌单里抽了一首 ${picked.artist} 的歌：${picked.title}`,
+    };
+  }
+
+  return {
+    track: null,
+    matches: [],
+    clarify: true,
+    message: `歌单里没有 ${artist} 的歌。可以说具体歌名，或配 Key 后让我全网抽一首。`,
   };
 }

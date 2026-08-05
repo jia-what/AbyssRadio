@@ -14,6 +14,7 @@ import { loadStoredBind } from './services/playlistApi';
 import { searchLibrary } from './services/aiSettingsApi';
 import { albumClarifySuggestions, findAlbumHint, parseAlbumQuery } from './utils/albumPlay';
 import { parseSongQuery } from './utils/songMatch';
+import { looksLikeArtistRequest, parseArtistQuery } from './utils/artistPlay';
 
 function extractSongQuery(text: string): string | null {
   const raw = String(text || '').trim();
@@ -73,7 +74,7 @@ export default function App() {
     isPlaying, messages, togglePlay, playNext, playPrev, addChatMessage,
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
-    insertAndPlay, searchAndInsertPlay, searchAndInsertAlbum, findInQueue,
+    insertAndPlay, searchAndInsertPlay, searchAndInsertAlbum, searchAndInsertArtist, findInQueue,
     trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, beatAnalyserRef, isDemoPlayback,
     translationLines, lyricMode, setLyricMode, trialInfo,
   } = useRadioState();
@@ -149,6 +150,82 @@ export default function App() {
   }, [insertAndPlay, searchAndInsertAlbum, addChatMessage]);
 
   /**
+   * 歌手级点播 (第 2 项)：歌单里按艺人抽一首；没有则全网搜艺人（艺人必须命中）抽一首；
+   * 都没有 → 诚实说明，绝不拿无关艺人凑。
+   */
+  const playArtistForAi = useCallback(async (
+    query: string,
+    opts: { allowGlobal?: boolean } = {},
+  ) => {
+    const allowGlobal = opts.allowGlobal === true;
+    const bind = loadStoredBind();
+    if (!bind?.sessionKey) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: '请先在右侧扫码登录，再从歌单里抽歌。',
+      });
+      return false;
+    }
+
+    const q = String(query || '').replace(/^artist:\s*/i, '').trim();
+    if (!q) return false;
+    const { artist } = parseArtistQuery(q);
+    if (!artist) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: '没听清要听谁的歌，再说一次？',
+      });
+      return false;
+    }
+
+    try {
+      // 1) 歌单
+      const lib = await searchLibrary(bind.sessionKey, q, 'artist');
+      if (lib.track) {
+        insertAndPlay(lib.track, bind.sessionKey);
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: `◉  ${lib.message}（插播）`,
+        });
+        return true;
+      }
+
+      // 2) 全网（艺人必须命中，由 searchAndInsertArtist 保证）
+      if (allowGlobal) {
+        const found = await searchAndInsertArtist(q, bind.sessionKey);
+        if (found) {
+          addChatMessage({
+            id: (Date.now() + 2).toString(),
+            role: 'ai',
+            text: `◉  歌单里没有 ${artist} 的歌，从全网抽了一首 — ${found.title} by ${found.artist}（插播）`,
+          });
+          return true;
+        }
+      }
+
+      // 3) 诚实失败
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: allowGlobal
+          ? `全网也没找到 ${artist} 的歌 — 平台可能没收录这位歌手。`
+          : `歌单里没有 ${artist} 的歌。导入 DeepSeek Key 后可搜全库。`,
+      });
+      return false;
+    } catch (e) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: e instanceof Error ? e.message : '歌手点播失败，请稍后重试。',
+      });
+      return false;
+    }
+  }, [insertAndPlay, searchAndInsertArtist, addChatMessage]);
+
+  /**
    * AI 点歌策略：
    * 1) 未登录 → 引导登录（不再全网搜，避免 VIP 30s 试听）
    * 2) 已登录 → 先搜用户歌单（优先原曲/已收藏）
@@ -174,6 +251,10 @@ export default function App() {
     let q = String(query || '').trim();
     if (/^album:/i.test(q)) {
       return playAlbumForAi(q, { allowGlobal });
+    }
+    // 歌手级请求优先走歌手链路（artist: 前缀 / 「放 X 的歌」）
+    if (/^artist:/i.test(q) || looksLikeArtistRequest(opts.userText || '', q)) {
+      return playArtistForAi(q, { allowGlobal });
     }
     // 主C：像专辑的请求（专辑字样 / album: / 命中专辑提示表）优先走专辑链路，
     // 避免同名单曲抢先命中（修 放 Scorpion → 播 Chris Schweizer 的 Scorpion）
@@ -253,7 +334,7 @@ export default function App() {
       });
       return false;
     }
-  }, [findInQueue, insertAndPlay, searchAndInsertPlay, playAlbumForAi, playNext, addChatMessage]);
+  }, [findInQueue, insertAndPlay, searchAndInsertPlay, playAlbumForAi, playArtistForAi, playNext, addChatMessage]);
 
   const handleSend = async (text: string) => {
     addChatMessage({ id: Date.now().toString(), role: 'user', text });
@@ -299,6 +380,14 @@ export default function App() {
             || (userQ && userQ.trim()) || '';
           setTimeout(() => {
             void playAlbumForAi(q, { allowGlobal: true });
+          }, 300);
+          return;
+        }
+
+        if (data.type === 'artist') {
+          const q = data.artistQuery || data.songQuery || '';
+          setTimeout(() => {
+            void playArtistForAi(q, { allowGlobal: true });
           }, 300);
           return;
         }
