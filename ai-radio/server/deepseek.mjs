@@ -31,7 +31,9 @@ const SYSTEM_PROMPT = `你是一个AI电台DJ，名叫Abyss。你的风格是深
 
 4. 纯聊天（喜不喜欢、代表作介绍、心情）→ 正常回话，不要加 PLAY:。只有用户明确要「放/听/播放/play」时才 PLAY。
 
-5. 回复简短，PLAY: 行之外最多一两句。`;
+5. **意图边界（重要）**：用户问「XX 有哪些代表作 / 介绍一下 XX / 代表作 / 评价 / 推荐几首 XX 的歌 / 他/她唱过什么」→ 这是**介绍类聊天，不是点歌**，即使提到歌名/歌手也**禁止 PLAY:**，只正常回答。
+
+6. 回复简短，PLAY: 行之外最多一两句。`;
 
 /**
  * Send a message to DeepSeek and get AI DJ response.
@@ -106,6 +108,17 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
 
     if (playMatch === '') {
       return { type: 'skip', text: textReply.trim() || '切换到下一首...' };
+    }
+
+    // 意图护栏（第 7 项）：用户原话没有点歌动词（放/play/听/点歌/来点/换/下一首），
+    // 模型即使输出 PLAY: 也当作闲聊误触发，降级为纯聊天——绝不误播。
+    const intentVerbs = /(?:放|播放|play|听|点歌|来点|来一首|换|下一首|切歌|随便)/i;
+    if (playMatch && !intentVerbs.test(userMessage)) {
+      return {
+        type: 'chat',
+        text: (textReply.trim() || `关于「${playMatch}」，${userMessage}—— 想听的话跟我说「放 ${playMatch}」。`),
+        droppedPlay: playMatch,
+      };
     }
 
     if (playMatch) {
