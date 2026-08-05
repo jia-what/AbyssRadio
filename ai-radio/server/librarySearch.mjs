@@ -240,13 +240,15 @@ async function loadLibraryTracks(sessionKey, query) {
   const cookie = fresh.cookie;
   const cached = cache.get(sessionKey);
   if (cached && Date.now() - cached.at < CACHE_MS) {
-    if (!query) return cached.tracks;
+    // 第 3 项后统一返回对象 { tracks, scannedPlaylists, totalPlaylists }（修缓存命中返回裸数组导致 .length 崩溃）
+    const meta = { tracks: cached.tracks, scannedPlaylists: 0, totalPlaylists: cached.totalPlaylists || 0 };
+    if (!query) return meta;
     if (String(query).startsWith('album:')) {
       const { album, artist } = parseAlbumQuery(query);
-      if (pickAlbumTrack(cached.tracks, album, artist)) return cached.tracks;
+      if (pickAlbumTrack(cached.tracks, album, artist)) return meta;
     } else {
       const hit = rankTracks(cached.tracks, query);
-      if (hit.length && hit[0].s >= EARLY_HIT) return cached.tracks;
+      if (hit.length && hit[0].s >= EARLY_HIT) return meta;
     }
     // weak / miss in cache → keep scanning more playlists below
   }
