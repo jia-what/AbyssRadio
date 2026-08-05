@@ -71,6 +71,12 @@ export function extractSongQuery(text: string): string | null {
   const raw = String(text || '').trim();
   if (!raw) return null;
 
+  const stripTail = (q: string) =>
+    q
+      .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦|嘛)+$/u, '')
+      .replace(/[。！？.!?]+$/g, '')
+      .trim();
+
   // 纯切歌，无搜索词
   if (/^(?:换一首|换歌|下一首|换一下|随便来一首|来一首|随便放一首)$/i.test(raw)) {
     return '';
@@ -81,11 +87,12 @@ export function extractSongQuery(text: string): string | null {
     return '';
   }
 
-  const stripTail = (q: string) =>
-    q
-      .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦)+$/u, '')
-      .replace(/[。！？.!?]+$/g, '')
-      .trim();
+  // 确认式回复: "是的 BLINDING LIGHTS" / "对 就是这首" → 提取歌名再点 (修 歧义澄清后确认不播放)
+  const confirm = raw.match(/^(?:是的|对的|对|嗯|就它|就是它|就这首|这个)[,，:：\s]+(.+)$/i);
+  if (confirm) {
+    const q = stripTail(confirm[1]);
+    if (q) return q;
+  }
 
   // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
   // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
@@ -94,8 +101,9 @@ export function extractSongQuery(text: string): string | null {
   );
   if (head) {
     const q = stripTail(head[1]);
-    // 「放」单独不成点歌；「放一首」无歌名 → 空=切歌
-    return q;
+    // 「放」+ 语气词剥光（放啊/放吧/放嘛）→ 不是切歌也不是点歌，交给模型当催促/闲聊
+    // 只有明确切歌词（换一首/下一首等）才返回空串=切歌
+    return q || null;
   }
 
   const cleanMatch = raw.match(/换(?:一首)?(.+?)(?:歌|听听)?$/);

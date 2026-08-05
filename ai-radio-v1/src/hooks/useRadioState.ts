@@ -620,6 +620,23 @@ export function useRadioState() {
       const normT = (s: string) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
       const nq = normT(titlePart || q);
       const sameTitle = results.filter((r) => normT(r.title || '') === nq || (nq.length >= 3 && normT(r.title || '').includes(nq)));
+
+      // 带艺人（by X / X 的 Y）：先硬过滤艺人，过滤后不再歧义，直接打分选最优
+      // （修 Blinding Lights by The Weeknd → 把 Weeknights/乐队都算进歧义）
+      if (artistPart) {
+        const aN = normT(artistPart);
+        const withArtist = sameTitle.filter((r) => {
+          const ra = normT(r.artist || '');
+          return ra.includes(aN) || aN.includes(ra);
+        });
+        if (withArtist.length > 0) {
+          const hit = pickBestTrack(withArtist, q, MIN_SONG_SCORE);
+          if (hit) return resolveLibrarySource(hit.track, sessionKey);
+        }
+        // 艺人过滤后无命中 → 诚实 miss（上层会提示没收录）
+        return null;
+      }
+
       if (sameTitle.length > 1) {
         const artists = [...new Set(sameTitle.map((r) => (r.artist || '').trim()).filter(Boolean))];
         if (artists.length > 1) return { ambiguous: artists.slice(0, 4) };

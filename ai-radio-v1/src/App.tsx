@@ -281,7 +281,7 @@ export default function App() {
           addChatMessage({
             id: (Date.now() + 2).toString(),
             role: 'ai',
-            text: `同名歌曲有多个版本：${found.ambiguous.map((a) => `「${q}」by ${a}`).join('，')}。告诉我要谁的，例如「放 ${q} by 谁」。`,
+            text: `同名歌曲有多个版本：${found.ambiguous.map((a) => `「${parseSongQuery(q).titlePart || q}」by ${a}`).join('，')}。告诉我要谁的，例如「放 ${parseSongQuery(q).titlePart || q} by 谁」。`,
           });
           return true;
         }
