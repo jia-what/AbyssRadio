@@ -14,10 +14,10 @@ check('extractSongQuery 抽词', q1 === '盆栽其他的', JSON.stringify(q1));
 check('looksLikeArtistRequest 识别为歌手级', looksLikeArtistRequest('换一首盆栽其他的歌', q1) === true);
 check('parseArtistQuery 剥「其他的」→ 盆栽', parseArtistQuery(q1).artist === '盆栽');
 
-console.log('\n=== 「换一首其他他的歌」===');
-const q2 = extractSongQuery('换一首其他他的歌');
-check('extractSongQuery 抽词', q2 === '其他他的', JSON.stringify(q2));
-check('looksLikeArtistRequest 识别为歌手级', looksLikeArtistRequest('换一首其他他的歌', q2) === true);
+console.log('\n=== 「换一首他其他的歌」===');
+const q2 = extractSongQuery('换一首他其他的歌吧');
+check('extractSongQuery 抽词', q2 === '他其他的歌', JSON.stringify(q2));
+check('looksLikeArtistRequest 识别为歌手级', looksLikeArtistRequest('换一首他其他的歌吧', q2) === true);
 check('parseArtistQuery 剥净 → 空 (取当前歌手)', parseArtistQuery(q2).artist === '');
 
 console.log('\n=== 未误伤 ===');

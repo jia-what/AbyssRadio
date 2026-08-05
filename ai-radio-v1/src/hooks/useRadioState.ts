@@ -335,7 +335,16 @@ export function useRadioState() {
         trackIndexRef.current = ni > 0 ? ni - 1 : tracks.length - 1;
       }
       setCurrentTrackIndex(trackIndexRef.current);
-      if (tracks.length === 0) return;
+      if (tracks.length === 0) {
+        // 队列只剩插播曲，清完后没得切：必须停掉当前音频，否则歌会一直放
+        const audio = audioRef.current;
+        if (audio) { audio.pause(); audio.src = ''; }
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        setProgress(0);
+        progressRef.current = 0;
+        return;
+      }
     }
 
     cancelAnimationFrame(rafRef.current);
@@ -375,7 +384,16 @@ export function useRadioState() {
       const curIdx = tracks.findIndex((t) => t.id === cur?.id);
       trackIndexRef.current = curIdx >= 0 ? curIdx : Math.max(0, Math.min(trackIndexRef.current, tracks.length - 1));
       setCurrentTrackIndex(trackIndexRef.current);
-      if (tracks.length === 0) return;
+      if (tracks.length === 0) {
+        // 队列只剩插播曲，清完后没得切：必须停掉当前音频
+        const audio = audioRef.current;
+        if (audio) { audio.pause(); audio.src = ''; }
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        setProgress(0);
+        progressRef.current = 0;
+        return;
+      }
     }
 
     cancelAnimationFrame(rafRef.current);
