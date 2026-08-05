@@ -62,6 +62,33 @@ function templateReply(userMessage) {
 }
 
 /**
+ * 上下文摘要（第 9 项）：从最近历史里提取「用户聊到的艺人/专辑」，注入 system，
+ * 让模型记得用户的偏好，而不是全靠窗口里的原始消息。
+ */
+function buildContextSummary(messageHistory) {
+  const recent = (messageHistory || []).slice(-16);
+  const artists = [];
+  const albums = [];
+  for (const m of recent) {
+    if (m?.role !== 'user') continue;
+    const text = String(m.text || '');
+    // album:X Y / X 的专辑
+    let am = text.match(/album:\s*([^,，。]+?)(?:\s+[A-Za-z][\w .'-]*)?$/i);
+    if (am) albums.push(am[1].trim());
+    // artist:X / X 的歌 / 放 X
+    let ar = text.match(/artist:\s*([^,，。]+)/i);
+    if (ar) artists.push(ar[1].trim());
+    ar = text.match(/(?:放|听|点歌|来点)\s*([\w .'-]{2,30})(?:的(?:歌|专辑))?/i);
+    if (ar && !/^(?:什么|哪些|哪个|谁|一首|一下|album|artist)\b/i.test(ar[1].trim())) artists.push(ar[1].trim());
+  }
+  const parts = [];
+  if (artists.length) parts.push(`用户最近聊到的艺人：${[...new Set(artists)].slice(-4).join(' / ')}`);
+  if (albums.length) parts.push(`用户最近聊到的专辑：${[...new Set(albums)].slice(-2).join(' / ')}`);
+  if (!parts.length) return '';
+  return `【会话摘要】${parts.join('；')}。聊到这些艺人/专辑时，如果用户没有明确说「放」，只介绍不播放。`;
+}
+
+/**
  * Send a message to DeepSeek and get AI DJ response.
  */
 export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack) {
@@ -78,10 +105,12 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
     ? `当前正在播放: "${currentTrack.title}" - ${currentTrack.artist}`
     : '当前没有播放任何歌曲';
 
+  const summary = buildContextSummary(messageHistory);
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'system', content: nowPlaying },
-    ...messageHistory.slice(-6).map(m => ({
+    ...(summary ? [{ role: 'system', content: summary }] : []),
+    ...messageHistory.slice(-16).map(m => ({
       role: m.role === 'ai' ? 'assistant' : 'user',
       content: m.text
     })),

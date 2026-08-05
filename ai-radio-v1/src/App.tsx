@@ -340,7 +340,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          history: messages.slice(-10),
+          history: messages.slice(-20),
           track: currentTrack,
         }),
       });
