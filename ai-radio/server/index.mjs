@@ -6,7 +6,7 @@ import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, 
 import { getUrlNeteaseSmart } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
 import { getDeepseekStatus, setDeepseekApiKey } from './settings.mjs';
-import { searchLibrary, clearLibraryCache } from './librarySearch.mjs';
+import { searchLibrary, clearLibraryCache, searchLibraryAlbum } from './librarySearch.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
 import { verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
 import { verifyKugouCookie, getKugouPlaylistsByCookie, getKugouTracksByCookie, getKugouPlayUrl } from './kugou.mjs';
@@ -276,8 +276,11 @@ app.post('/api/settings/deepseek', express.json(), function(req, res) {
 app.post('/api/library/search', express.json(), async function(req, res) {
   const key = req.body?.key || req.body?.sessionKey || '';
   const q = req.body?.q || req.body?.query || '';
+  const mode = String(req.body?.mode || 'song').toLowerCase();
   try {
-    const result = await searchLibrary(key, q);
+    const result = mode === 'album'
+      ? await searchLibraryAlbum(key, q)
+      : await searchLibrary(key, q);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message, track: null, matches: [], message: e.message });

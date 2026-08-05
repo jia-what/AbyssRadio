@@ -12,6 +12,7 @@ import { useParticleCamera } from './hooks/useParticleCamera';
 import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
 import { loadStoredBind } from './services/playlistApi';
 import { searchLibrary } from './services/aiSettingsApi';
+import { albumClarifySuggestions, findAlbumHint, parseAlbumQuery } from './utils/albumPlay';
 
 function extractSongQuery(text: string): string | null {
   const raw = String(text || '').trim();
@@ -49,6 +50,13 @@ function extractSongQuery(text: string): string | null {
   return null;
 }
 
+/** 用户话里是否像在点专辑 */
+function looksLikeAlbumRequest(text: string, query: string): boolean {
+  if (/专辑|这张|那张|album/i.test(text)) return true;
+  if (/^album:/i.test(query)) return true;
+  return !!findAlbumHint(query);
+}
+
 export default function App() {
   // 待机默认入口：主场景延后挂载，避免开局同时起 3 套 WebGL（环/按钮/封面粒子）卡顿。
   // 点击进入 → 立刻暖机挂载 main（叠在淡出底下）→ 淡出结束再卸待机。
@@ -64,20 +72,91 @@ export default function App() {
     isPlaying, messages, togglePlay, playNext, playPrev, addChatMessage,
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
-    insertAndPlay, searchAndInsertPlay, findInQueue,
+    insertAndPlay, searchAndInsertPlay, searchAndInsertAlbum, findInQueue,
     trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, beatAnalyserRef, isDemoPlayback,
     translationLines, lyricMode, setLyricMode, trialInfo,
   } = useRadioState();
+
+  /**
+   * A+C 专辑点播：有把握抽一首插播；没把握列出候选澄清，绝不拿同歌手无关单曲凑。
+   */
+  const playAlbumForAi = useCallback(async (
+    query: string,
+    opts: { allowGlobal?: boolean } = {},
+  ) => {
+    const allowGlobal = opts.allowGlobal === true;
+    const bind = loadStoredBind();
+    if (!bind?.sessionKey) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: '请先在右侧扫码登录，再从专辑里抽歌。',
+      });
+      return false;
+    }
+
+    const q = String(query || '').replace(/^album:\s*/i, '').trim();
+    if (!q) return false;
+    const { album, artist } = parseAlbumQuery(q);
+
+    try {
+      const lib = await searchLibrary(bind.sessionKey, q, 'album');
+      if (lib.track) {
+        insertAndPlay(lib.track, bind.sessionKey);
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: `◉  ${lib.message}（插播）`,
+        });
+        return true;
+      }
+
+      if (allowGlobal) {
+        const found = await searchAndInsertAlbum(q, bind.sessionKey);
+        if (found) {
+          addChatMessage({
+            id: (Date.now() + 2).toString(),
+            role: 'ai',
+            text: `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（插播）`,
+          });
+          return true;
+        }
+      }
+
+      const suggestions = lib.suggestions?.length
+        ? lib.suggestions
+        : albumClarifySuggestions(album, artist);
+      const hint = suggestions.length
+        ? `想听哪首？可以说：${suggestions.slice(0, 3).join(' / ')}`
+        : '可以说专辑里的具体歌名。';
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: lib.message?.includes('想听哪首')
+          ? `◉  ${lib.message}`
+          : `◉  「${album}」更像专辑名，我还不能有把握抽曲。${hint}`,
+      });
+      return false;
+    } catch (e) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: e instanceof Error ? e.message : '专辑点播失败，请稍后重试。',
+      });
+      return false;
+    }
+  }, [insertAndPlay, searchAndInsertAlbum, addChatMessage]);
 
   /**
    * AI 点歌策略：
    * 1) 未登录 → 引导登录（不再全网搜，避免 VIP 30s 试听）
    * 2) 已登录 → 先搜用户歌单（优先原曲/已收藏）
    * 3) 歌单没有且 allowGlobal → 再全网搜索
+   * 4) 单曲全失败且像专辑 → 走 A+C 专辑抽曲 / 澄清
    */
   const playSongForAi = useCallback(async (
     query: string,
-    opts: { allowGlobal?: boolean } = {},
+    opts: { allowGlobal?: boolean; userText?: string } = {},
   ) => {
     const allowGlobal = opts.allowGlobal === true;
     const bind = loadStoredBind();
@@ -91,7 +170,10 @@ export default function App() {
       return false;
     }
 
-    const q = String(query || '').trim();
+    let q = String(query || '').trim();
+    if (/^album:/i.test(q)) {
+      return playAlbumForAi(q, { allowGlobal });
+    }
     if (!q) {
       playNext();
       return true;
@@ -133,18 +215,19 @@ export default function App() {
           });
           return true;
         }
-        addChatMessage({
-          id: (Date.now() + 2).toString(),
-          role: 'ai',
-          text: lib.message || `没找到与「${q}」歌名匹配的曲目。若是专辑名，试试具体歌名（例如 Nonstop、God's Plan）。`,
-        });
-        return false;
+      }
+
+      // 4) 单曲失败且像专辑 → A+C
+      if (looksLikeAlbumRequest(opts.userText || '', q)) {
+        return playAlbumForAi(q, { allowGlobal });
       }
 
       addChatMessage({
         id: (Date.now() + 2).toString(),
         role: 'ai',
-        text: lib.message || `歌单里没有「${q}」。导入 DeepSeek Key 后可搜全库。`,
+        text: lib.message || (allowGlobal
+          ? `没找到与「${q}」歌名匹配的曲目。若是专辑，可以说「放专辑 ${q}」。`
+          : `歌单里没有「${q}」。导入 DeepSeek Key 后可搜全库。`),
       });
       return false;
     } catch (e) {
@@ -155,7 +238,8 @@ export default function App() {
       });
       return false;
     }
-  }, [findInQueue, insertAndPlay, searchAndInsertPlay, playNext, addChatMessage]);
+  }, [findInQueue, insertAndPlay, searchAndInsertPlay, playAlbumForAi, playNext, addChatMessage]);
+
   const handleSend = async (text: string) => {
     addChatMessage({ id: Date.now().toString(), role: 'user', text });
 
@@ -178,7 +262,9 @@ export default function App() {
           const query = extractSongQuery(text);
           if (query !== null) {
             addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: data.text });
-            setTimeout(() => { void playSongForAi(query, { allowGlobal: false }); }, 280);
+            setTimeout(() => {
+              void playSongForAi(query, { allowGlobal: false, userText: text });
+            }, 280);
             return;
           }
           addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: data.text });
@@ -192,12 +278,25 @@ export default function App() {
           return;
         }
 
-        if (data.type === 'play') {
-          // 用户原话里的歌名优先，避免模型从上下文乱加艺人（如多拼 SZA）
+        if (data.type === 'album') {
           const userQ = extractSongQuery(text);
-          const q = (userQ && userQ.trim()) ? userQ.trim() : (data.songQuery || '');
+          const q = data.albumQuery || data.songQuery
+            || (userQ && userQ.trim()) || '';
           setTimeout(() => {
-            void playSongForAi(q, { allowGlobal: true });
+            void playAlbumForAi(q, { allowGlobal: true });
+          }, 300);
+          return;
+        }
+
+        if (data.type === 'play') {
+          // 用户原话里的歌名优先；若模型给了 album: 则走专辑
+          const userQ = extractSongQuery(text);
+          let q = (userQ && userQ.trim()) ? userQ.trim() : (data.songQuery || '');
+          if (/^album:/i.test(String(data.songQuery || ''))) {
+            q = String(data.songQuery);
+          }
+          setTimeout(() => {
+            void playSongForAi(q, { allowGlobal: true, userText: text });
           }, 300);
           return;
         }
@@ -205,7 +304,7 @@ export default function App() {
         const query = extractSongQuery(text);
         if (query !== null) {
           setTimeout(() => {
-            void playSongForAi(query, { allowGlobal: true });
+            void playSongForAi(query, { allowGlobal: true, userText: text });
           }, 300);
         }
         return;
@@ -216,7 +315,7 @@ export default function App() {
 
     const query = extractSongQuery(text);
     if (query !== null) {
-      await playSongForAi(query, { allowGlobal: false });
+      await playSongForAi(query, { allowGlobal: false, userText: text });
     } else {
       setTimeout(() => {
         addChatMessage({

@@ -10,20 +10,24 @@ const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 const SYSTEM_PROMPT = `你是一个AI电台DJ，名叫Abyss。你的风格是深邃、诗意、带一点赛博朋克的冷淡浪漫。
 
 绝对规则（禁止违反）：
-1. 当用户有任何点歌意向时，你的回复**第一行必须是 "PLAY: 具体的搜索词"**。PLAY: 后面的我会原样拿去搜歌。
-   - 用户说"放bieber的歌"、听bieber → PLAY: Justin Bieber
-   - 用户说"换一首别的"、"换一首"、"下一首" → PLAY:（空，后面不要写词）
-   - 用户说"随便放一首"、"来一首" → PLAY:（空）
-   - 用户说具体歌名 → PLAY: 歌名（用户提了歌手则 PLAY: 歌名 by 歌手）
-   - 例：play luther by kendrick lamar → PLAY: luther by kendrick lamar
-   - 例：放一首Scorpion听一下 → PLAY: Scorpion
-   - 若用户点的是专辑名（如刚聊到的 Scorpion），仍写 PLAY: 专辑名；可补歌手写成 PLAY: Scorpion Drake，但**禁止**擅自换成该歌手其它单曲名（如 Toosie Slide、God's Plan）
+1. 当用户有任何点歌意向时，你的回复**第一行必须是 PLAY 指令**（下面三种之一）：
+   - 单曲：PLAY: 歌名   或  PLAY: 歌名 by 歌手
+   - 专辑：PLAY: album:专辑名 歌手   （用户要听「一张专辑里的歌」时用这个）
+   - 切歌：PLAY:（空，后面不要写词）— 「换一首」「下一首」「随便来一首」
 
-2. 搜索词必须保留用户要的作品名。禁止用「同歌手随便另一首」冒充。搜不到由系统处理，你不要自己改歌名。
+   例：
+   - play luther by kendrick → PLAY: luther by kendrick lamar
+   - 放一首Scorpion听一下（Scorpion 是专辑）→ PLAY: album:Scorpion Drake
+   - 放 Drake 的 Scorpion 专辑 → PLAY: album:Scorpion Drake
+   - 放 God's Plan → PLAY: God's Plan by Drake
+   - 放bieber的歌 → PLAY: Justin Bieber
+   - 换一首 → PLAY:
 
-3. 纯聊天（喜不喜欢某歌手、代表作介绍、心情）→ 正常回话，**不要**加 PLAY:。只有用户明确要「放/听/播放/play」时才 PLAY。
+2. 专辑 vs 单曲：聊到专辑名、或用户说「这张专辑 / 专辑里的歌 / 放一张 xxx」→ 必须用 album: 前缀。禁止把专辑名擅自换成该专辑外的单曲（如 Scorpion → Toosie Slide）。
 
-4. 绝不允许猜测用户没点的歌。聊过 Drake 也不等于可以 PLAY 任意 Drake 歌。
+3. 搜索词必须保留用户要的作品名。禁止用「同歌手随便另一首」冒充。
+
+4. 纯聊天（喜不喜欢、代表作介绍、心情）→ 正常回话，不要加 PLAY:。只有用户明确要「放/听/播放/play」时才 PLAY。
 
 5. 回复简短，PLAY: 行之外最多一两句。`;
 
@@ -84,7 +88,6 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
     const data = await res.json();
     const reply = data.choices?.[0]?.message?.content?.trim() || '...';
 
-    // Check if it's a play request (PLAY: at start of any line)
     const lines = reply.split('\n');
     let playMatch = null;
     let textReply = '';
@@ -99,12 +102,17 @@ export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack
       }
     }
 
-    // If PLAY: has no search term (just "PLAY:"), set a flag for "skip"
     if (playMatch === '') {
       return { type: 'skip', text: textReply.trim() || '切换到下一首...' };
     }
 
     if (playMatch) {
+      const album = playMatch.match(/^album:\s*(.+)$/i);
+      if (album) {
+        const albumQuery = album[1].trim();
+        textReply = textReply.trim() || `正在从专辑「${albumQuery}」抽一首...`;
+        return { type: 'album', text: textReply, albumQuery, songQuery: albumQuery };
+      }
       textReply = textReply.trim() || `正在搜索 ${playMatch}...`;
       return { type: 'play', text: textReply, songQuery: playMatch };
     }

@@ -37,6 +37,7 @@ export interface LibrarySearchResult {
     cover: string;
     duration: number;
     source: string;
+    album?: string;
   } | null;
   matches: Array<{
     id: string;
@@ -45,19 +46,23 @@ export interface LibrarySearchResult {
     cover: string;
     duration: number;
     source: string;
+    album?: string;
   }>;
   message: string;
+  suggestions?: string[];
+  clarify?: boolean;
   error?: string;
 }
 
 export async function searchLibrary(
   sessionKey: string,
   query: string,
+  mode: 'song' | 'album' = 'song',
 ): Promise<LibrarySearchResult> {
   const res = await fetch('/api/library/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: sessionKey, q: query }),
+    body: JSON.stringify({ key: sessionKey, q: query, mode }),
   });
   const data = await res.json();
   if (!res.ok && !data.message) throw new Error(data.error || '歌单搜索失败');

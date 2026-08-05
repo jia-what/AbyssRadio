@@ -5,6 +5,12 @@
 import { getSession, ensureFreshSession } from './session.mjs';
 import { getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
 import { getKugouPlaylistsByCookie, getKugouTracksByCookie } from './kugou.mjs';
+import {
+  parseAlbumQuery,
+  pickAlbumTrack,
+  albumClarifySuggestions,
+  trackMatchesAlbum,
+} from './albumPlay.mjs';
 
 const cache = new Map(); // key -> { at, tracks }
 const CACHE_MS = 5 * 60 * 1000;
@@ -162,8 +168,13 @@ async function loadLibraryTracks(sessionKey, query) {
   const cached = cache.get(sessionKey);
   if (cached && Date.now() - cached.at < CACHE_MS) {
     if (!query) return cached.tracks;
-    const hit = rankTracks(cached.tracks, query);
-    if (hit.length && hit[0].s >= EARLY_HIT) return cached.tracks;
+    if (String(query).startsWith('album:')) {
+      const { album, artist } = parseAlbumQuery(query);
+      if (pickAlbumTrack(cached.tracks, album, artist)) return cached.tracks;
+    } else {
+      const hit = rankTracks(cached.tracks, query);
+      if (hit.length && hit[0].s >= EARLY_HIT) return cached.tracks;
+    }
     // weak / miss in cache → keep scanning more playlists below
   }
 
@@ -202,12 +213,19 @@ async function loadLibraryTracks(sessionKey, query) {
           artist: t.artist || '',
           cover: t.cover || '',
           duration: t.duration || 0,
+          album: t.album || '',
           source: t.source || session.platform,
         };
         tracks.push(row);
         if (query) {
           const s = scoreTrack(row, query);
           if (s > bestScore) bestScore = s;
+          // album-mode progressive: album field hit also counts as early stop signal
+          if (query.startsWith('album:')) {
+            const { album, artist } = parseAlbumQuery(query);
+            const as = trackMatchesAlbum(row, album, artist).score;
+            if (as > bestScore) bestScore = as;
+          }
         }
         if (tracks.length >= MAX_TRACKS) break;
       }
@@ -261,5 +279,70 @@ export async function searchLibrary(sessionKey, query) {
     track,
     matches: ranked,
     message: `在歌单里找到了：${track.title} — ${track.artist}`,
+  };
+}
+
+/**
+ * Album intent: pick a track from album in user library, or return clarify suggestions.
+ * @returns {{ track, matches, suggestions, message, clarify: boolean }}
+ */
+export async function searchLibraryAlbum(sessionKey, query) {
+  if (!sessionKey) {
+    return {
+      track: null, matches: [], suggestions: [], clarify: true,
+      message: '请先在右侧扫码登录，才能在歌单里点歌。',
+    };
+  }
+  if (!getSession(sessionKey)) {
+    return {
+      track: null, matches: [], suggestions: [], clarify: true,
+      message: '会话已失效，请重新扫码登录。',
+    };
+  }
+
+  const { album, artist, raw } = parseAlbumQuery(query);
+  if (!album) {
+    return {
+      track: null, matches: [], suggestions: [], clarify: true,
+      message: '没听清专辑名，再说一次？',
+    };
+  }
+
+  const scanKey = `album:${raw}`;
+  const tracks = await loadLibraryTracks(sessionKey, scanKey);
+  const picked = pickAlbumTrack(tracks, album, artist);
+  if (picked) {
+    const siblings = tracks
+      .map((t) => ({ t, ...trackMatchesAlbum(t, album, artist) }))
+      .filter((x) => x.score >= 80)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((x) => x.t);
+    return {
+      track: picked,
+      matches: siblings,
+      suggestions: [],
+      clarify: false,
+      message: `从专辑「${album}」里抽了一首：${picked.title} — ${picked.artist}`,
+    };
+  }
+
+  const suggestions = albumClarifySuggestions(album, artist);
+  const label = artist ? `《${album}》(${artist})` : `《${album}》`;
+  if (suggestions.length) {
+    return {
+      track: null,
+      matches: [],
+      suggestions,
+      clarify: true,
+      message: `歌单里没有确认属于${label}的曲目。这是专辑的话，想听哪首？比如 ${suggestions.slice(0, 3).join(' / ')}`,
+    };
+  }
+  return {
+    track: null,
+    matches: [],
+    suggestions: [],
+    clarify: true,
+    message: `歌单里没找到专辑${label}的曲目。可以说具体歌名，或配 Key 后让我全网抽一首。`,
   };
 }

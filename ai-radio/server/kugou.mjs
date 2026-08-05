@@ -1248,6 +1248,7 @@ export async function getKugouTracksByCookie(listId, cookie) {
         artist,
         cover: trackCover(t, fallbackCover),
         duration: trackDurationSec(t),
+        album: t.album_name || t.albumname || t.albumName || t.album?.album_name || t.album?.name || '',
         source: 'kugou',
       };
     }).filter((t) => t.id),

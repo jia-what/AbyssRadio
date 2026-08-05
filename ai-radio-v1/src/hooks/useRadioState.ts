@@ -3,6 +3,7 @@ import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 import { pickBestTrack, MIN_SONG_SCORE } from '../utils/songMatch';
+import { parseAlbumQuery, pickAlbumTrack } from '../utils/albumPlay';
 
 function searchResultToTrack(s: SearchResult): Track {
   return {
@@ -538,6 +539,32 @@ export function useRadioState() {
     }
   }, [insertAndPlay]);
 
+  /** 专辑抽曲：全网结果按 album 字段 / 提示曲目过滤，没把握则返回 null（由上层澄清） */
+  const searchAndInsertAlbum = useCallback(async (
+    albumQuery: string,
+    sessionKey?: string,
+  ): Promise<{ track: Track; album: string } | null> => {
+    try {
+      const { album, artist, raw } = parseAlbumQuery(albumQuery);
+      if (!album) return null;
+      const results = await searchMusic(`${album} ${artist || ''}`.trim(), 'both', 16);
+      if (!results?.length) return null;
+      const chosen = pickAlbumTrack(results, album, artist);
+      if (!chosen) return null;
+      const track = insertAndPlay({
+        id: chosen.id,
+        title: chosen.title,
+        artist: chosen.artist || '',
+        cover: chosen.cover || '',
+        duration: chosen.duration || 200,
+        source: chosen.source || 'netease',
+      }, sessionKey);
+      return track ? { track, album: album || raw } : null;
+    } catch {
+      return null;
+    }
+  }, [insertAndPlay]);
+
   // ===== Play a real playlist in order (queue = the playlist itself) =====
   const playPlaylist = useCallback((
     tracks: { id: string; title: string; artist: string; cover: string; duration: number; source: string }[],
@@ -627,7 +654,7 @@ export function useRadioState() {
     pulseAnalyserRef,
     beatAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
-    requestSong, searchAndPlay, searchAndInsertPlay, insertAndPlay, findInQueue, playPlaylist,
+    requestSong, searchAndPlay, searchAndInsertPlay, searchAndInsertAlbum, insertAndPlay, findInQueue, playPlaylist,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),
     endPortal: () => setIsPortaling(false),
   };

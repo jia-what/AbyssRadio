@@ -301,6 +301,7 @@ export async function getNeteaseTracksByCookie(listId, cookie) {
     artist: (t.ar || t.artists || []).map(a => a.name).join(', '),
     cover: trackCover(t) || coverMap.get(String(t.id)) || fallbackCover || '',
     duration: t.dt ? t.dt / 1000 : 0,
+    album: t.al?.name || t.album?.name || '',
     source: 'netease',
   }));
   return mapped;

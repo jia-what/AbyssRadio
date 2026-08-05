@@ -53,6 +53,7 @@ function parseResponse(data) {
       artist: artistName || s.singername || '',
       cover: coverUrl || s.cover || s.pic_big || s.pic_small || '',
       duration: s.duration ? Math.round(typeof s.duration === 'string' ? parseInt(s.duration) : s.duration) : s.dt ? s.dt / 1000 : (s.duration || 0),
+      album: (s.album && (s.album.name || s.album)) || s.al?.name || s.albumname || s.album_name || s.albumName || '',
       source: '',
     };
   });

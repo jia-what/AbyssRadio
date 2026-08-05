@@ -7,6 +7,7 @@ export interface SearchResult {
   cover: string;
   duration: number;
   source: string;
+  album?: string;
 }
 
 interface SearchResponse {
