@@ -13,6 +13,7 @@ import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './util
 import { loadStoredBind } from './services/playlistApi';
 import { searchLibrary } from './services/aiSettingsApi';
 import { albumClarifySuggestions, findAlbumHint, parseAlbumQuery } from './utils/albumPlay';
+import { parseSongQuery } from './utils/songMatch';
 
 function extractSongQuery(text: string): string | null {
   const raw = String(text || '').trim();
@@ -231,12 +232,17 @@ export default function App() {
         }
       }
 
+      // 全网兜底失败：不要显示歌单的"配 Key"话术（已搜过全网），诚实说明
+      const { titlePart, artistPart } = parseSongQuery(q);
+      const missText = artistPart
+        ? `全网也没找到 ${artistPart} 的《${titlePart}》— 平台可能没收录这个版本。`
+        : allowGlobal
+          ? `没找到与「${titlePart || q}」歌名匹配的曲目。若是专辑，可以说「放专辑 ${q}」。`
+          : `歌单里没有「${q}」。导入 DeepSeek Key 后可搜全库。`;
       addChatMessage({
         id: (Date.now() + 2).toString(),
         role: 'ai',
-        text: lib.message || (allowGlobal
-          ? `没找到与「${q}」歌名匹配的曲目。若是专辑，可以说「放专辑 ${q}」。`
-          : `歌单里没有「${q}」。导入 DeepSeek Key 后可搜全库。`),
+        text: missText,
       });
       return false;
     } catch (e) {

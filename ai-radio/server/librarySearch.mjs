@@ -48,7 +48,7 @@ function tokensOf(s) {
  */
 export function parseSongQuery(query) {
   let raw = String(query || '').trim();
-  raw = raw.replace(/^(?:play|放|听|点歌)\s+/i, '').trim();
+  raw = raw.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
   let titlePart = raw;
   let artistPart = '';
   const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
@@ -60,6 +60,13 @@ export function parseSongQuery(query) {
     if (dash) {
       titlePart = dash[1].trim();
       artistPart = dash[2].trim();
+    } else {
+      // 中文口语: "HABIBTI Drake的" → title=前, artist=后 (与前端对齐)
+      const cn = raw.match(/^(.+?)\s+([^\s]+)的$/);
+      if (cn) {
+        titlePart = cn[1].trim();
+        artistPart = cn[2].trim();
+      }
     }
   }
   return { titlePart, artistPart, raw };
@@ -93,8 +100,9 @@ function scoreInterpretation(track, titlePart, artistPart) {
     const atks = tokensOf(artistPart);
     if (atks.length) {
       const aHits = atks.filter((t) => artist.includes(norm(t)));
-      if (!aHits.length) bonus -= 35;
-      else bonus += Math.round(28 * (aHits.length / atks.length));
+      // 主C：带艺人（by X / X - Y / X的）必须命中，否则否决——与前端 songMatch 对齐
+      if (!aHits.length) return 0;
+      bonus += Math.round(28 * (aHits.length / atks.length));
     }
   }
 

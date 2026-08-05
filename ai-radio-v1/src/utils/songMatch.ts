@@ -33,7 +33,7 @@ export function parseSongQuery(query: string): {
   raw: string;
 } {
   let raw = String(query || '').trim();
-  raw = raw.replace(/^(?:play|放|听|点歌)\s+/i, '').trim();
+  raw = raw.replace(/^(?:play|播放|放|听|点歌)\s+/i, '').trim();
   let titlePart = raw;
   let artistPart = '';
   const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
@@ -45,6 +45,13 @@ export function parseSongQuery(query: string): {
     if (dash) {
       titlePart = dash[1].trim();
       artistPart = dash[2].trim();
+    } else {
+      // 中文口语: "HABIBTI Drake的" / "Nonstop 老王唱的" → title=前, artist=后
+      const cn = raw.match(/^(.+?)\s+([^\s]+)的$/);
+      if (cn) {
+        titlePart = cn[1].trim();
+        artistPart = cn[2].trim();
+      }
     }
   }
   return { titlePart, artistPart, raw };
