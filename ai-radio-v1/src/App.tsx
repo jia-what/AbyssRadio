@@ -202,7 +202,7 @@ export default function App() {
    */
   const playSongForAi = useCallback(async (
     query: string,
-    opts: { allowGlobal?: boolean; userText?: string } = {},
+    opts: { allowGlobal?: boolean; userText?: string; triedNormalize?: boolean } = {},
   ) => {
     const allowGlobal = opts.allowGlobal === true;
     const bind = loadStoredBind();
@@ -280,6 +280,30 @@ export default function App() {
               : `◉  歌单里没这首，我全网找了一首 — ${found.title} by ${found.artist}`,
           });
           return true;
+        }
+      }
+
+      // 全网兜底失败：先试 AI 别名规范化（火星哥→Bruno Mars 等），再诚实说明
+      if (allowGlobal && !opts.triedNormalize) {
+        try {
+          const nr = await fetch('/api/ai/normalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ q }),
+          });
+          const nd = await nr.json();
+          const normalized = String(nd?.normalized || '').trim();
+          // 规范化结果必须和原查询不同才重试（防死循环），且仍走打分硬过滤
+          if (normalized && normalized !== q && normalized.length <= 80) {
+            addChatMessage({
+              id: (Date.now() + 1).toString(),
+              role: 'ai',
+              text: `换个说法再找一次：「${normalized}」`,
+            });
+            return playSongForAi(normalized, { allowGlobal, triedNormalize: true, userText: q });
+          }
+        } catch {
+          // 规范化失败不影响原话术
         }
       }
 

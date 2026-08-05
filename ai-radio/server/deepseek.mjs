@@ -89,6 +89,54 @@ function buildContextSummary(messageHistory) {
 }
 
 /**
+ * 别名/口语规范化（老板反馈：别名靠手工表永远追不上 AI 的知识）。
+ * 本地 miss 时调用：把「火星哥的talking to the moon」→ "Talking to the Moon by Bruno Mars"。
+ * 返回规范化 query 或 null（无 Key / 模型没给有效结果）。
+ * 注意：结果只是「搜索词」，前端仍走艺人硬过滤打分，不会因规范化而瞎播。
+ */
+export async function normalizeSongQuery(rawQuery) {
+  if (!hasDeepseekApiKey()) return null;
+  const q = String(rawQuery || '').trim();
+  if (!q) return null;
+
+  const apiKey = getDeepseekApiKey();
+  const prompt = `把用户点歌口语转成标准搜索词，只输出一行，不要解释、不要加引号、不要输出其它内容。
+
+规则：
+- 中文歌手绰号/译名转英文标准名（公鸭→Drake，火星哥→Bruno Mars，盆栽→The Weeknd，姆爷→Eminem，侃爷→Kanye West，霉霉→Taylor Swift，黄老板→Ed Sheeran，断眉→Charlie Puth）
+- 格式：歌名 by 歌手（歌名在前），歌手不确定就只给歌名
+- 中文歌名保留中文
+- 不要编造歌名：用户给了歌名就用原歌名（纠正拼写/大小写即可）
+
+输入：${q}
+输出：`;
+
+  try {
+    const res = await fetch(DEEPSEEK_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 60,
+        temperature: 0.1,
+        stream: false,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out = String(data.choices?.[0]?.message?.content || '').trim();
+    if (!out || out.length > 80) return null;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Send a message to DeepSeek and get AI DJ response.
  */
 export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack, opts = {}) {

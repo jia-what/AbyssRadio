@@ -4,7 +4,7 @@ import cors from 'cors';
 import { Readable } from 'stream';
 import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie, isPlayableUrl } from './ncm.mjs';
 import { getUrlNeteaseSmart } from './ncm-neapi.mjs';
-import { chatWithDeepSeek } from './deepseek.mjs';
+import { chatWithDeepSeek, normalizeSongQuery } from './deepseek.mjs';
 import { getDeepseekStatus, setDeepseekApiKey, pingDeepseekKey } from './settings.mjs';
 import { searchLibrary, clearLibraryCache, searchLibraryAlbum, searchLibraryArtist } from './librarySearch.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
@@ -235,6 +235,18 @@ app.get('/api/music/lyric', async function(req, res) {
     const lyric = await getLyric(id, source, platformCookie, keyword);
     if (typeof lyric === 'string') res.json({ lyric, krc: '', tlyric: '' });
     else res.json({ lyric: lyric.lrc || '', krc: lyric.krc || '', tlyric: lyric.tlyric || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** 别名/口语规范化（本地 miss 后兜底）：q → 标准搜索词，如「火星哥的talking to the moon」→ "Talking to the Moon by Bruno Mars" */
+app.post('/api/ai/normalize', express.json(), async function(req, res) {
+  const q = String(req.body?.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'missing q' });
+  try {
+    const normalized = await normalizeSongQuery(q);
+    res.json({ normalized });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
