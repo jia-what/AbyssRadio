@@ -17,6 +17,8 @@ import {
 const cache = new Map(); // key -> { at, tracks }
 const CACHE_MS = 5 * 60 * 1000;
 const MAX_PLAYLISTS = 40;
+/** 歌手/专辑查询按需加深扫描的歌单上限（可能漏在第 40 个之后的歌单里） */
+const MAX_PLAYLISTS_DEEP = 100;
 const MAX_TRACKS = 3000;
 /** Reject weak / artist-only noise. */
 const MIN_SCORE = 50;
@@ -208,9 +210,18 @@ async function loadLibraryTracks(sessionKey, query) {
   const seen = new Set(tracks.map((t) => String(t.id)));
   let bestScore = query ? (rankTracks(tracks, query)[0]?.s || 0) : 0;
 
-  for (const pl of playlists.slice(0, MAX_PLAYLISTS)) {
+  // 歌手/专辑查询按需加深扫描（第 3 项）：普通歌名 40 个歌单封顶；
+  // artist:/album: 加深到 MAX_PLAYLISTS_DEEP，减少漏检误走全网。
+  const isDeep = /^(artist|album):/i.test(String(query || ''));
+  const plLimit = isDeep
+    ? Math.min(MAX_PLAYLISTS_DEEP, playlists.length)
+    : Math.min(MAX_PLAYLISTS, playlists.length);
+  let scannedPl = 0;
+
+  for (const pl of playlists.slice(0, plLimit)) {
     if (tracks.length >= MAX_TRACKS) break;
     if (query && bestScore >= EARLY_HIT) break;
+    scannedPl += 1;
     try {
       const list = await fetchPlaylistTracks(session, cookie, pl);
       for (const t of list) {
@@ -236,6 +247,12 @@ async function loadLibraryTracks(sessionKey, query) {
             const as = trackMatchesAlbum(row, album, artist).score;
             if (as > bestScore) bestScore = as;
           }
+          // artist-mode progressive: artist field hit also counts
+          if (query.startsWith('artist:')) {
+            const { artist: aq } = parseArtistQuery(query);
+            const as = trackMatchesArtist(row, aq).score;
+            if (as > bestScore) bestScore = as;
+          }
         }
         if (tracks.length >= MAX_TRACKS) break;
       }
@@ -245,7 +262,12 @@ async function loadLibraryTracks(sessionKey, query) {
   }
 
   cache.set(sessionKey, { at: Date.now(), tracks });
-  return tracks;
+  return {
+    tracks,
+    // 本次扫描覆盖信息（供“可能未扫全”提示；有缓存命中时 scanned=0 表示直接用的缓存）
+    scannedPlaylists: scannedPl,
+    totalPlaylists: playlists.length,
+  };
 }
 
 /** Invalidate cache after re-login / playlist change. */
@@ -265,7 +287,8 @@ export async function searchLibrary(sessionKey, query) {
     return { track: null, matches: [], message: '会话已失效，请重新扫码登录。' };
   }
   const q = String(query || '').trim();
-  const tracks = await loadLibraryTracks(sessionKey, q || null);
+  const loaded = await loadLibraryTracks(sessionKey, q || null);
+  const tracks = loaded.tracks;
   if (!tracks.length) {
     return { track: null, matches: [], message: '歌单是空的，先去平台加几首歌再来点。' };
   }
@@ -319,7 +342,8 @@ export async function searchLibraryAlbum(sessionKey, query) {
   }
 
   const scanKey = `album:${raw}`;
-  const tracks = await loadLibraryTracks(sessionKey, scanKey);
+  const loaded = await loadLibraryTracks(sessionKey, scanKey);
+  const tracks = loaded.tracks;
   const picked = pickAlbumTrack(tracks, album, artist);
   if (picked) {
     const siblings = tracks
@@ -339,6 +363,10 @@ export async function searchLibraryAlbum(sessionKey, query) {
 
   const suggestions = albumClarifySuggestions(album, artist);
   const label = artist ? `《${album}》(${artist})` : `《${album}》`;
+  // 第 3 项：加深扫描后仍没命中且歌单没扫全 → 提示可能未扫全，别误判为"没有"
+  const scanWarn = loaded.scannedPlaylists > 0 && loaded.scannedPlaylists < loaded.totalPlaylists
+    ? `（已扫前 ${loaded.scannedPlaylists}/${loaded.totalPlaylists} 个歌单，可能未扫全）`
+    : '';
   if (suggestions.length) {
     return {
       track: null,
@@ -353,7 +381,7 @@ export async function searchLibraryAlbum(sessionKey, query) {
     matches: [],
     suggestions: [],
     clarify: true,
-    message: `歌单里没找到专辑${label}的曲目。可以说具体歌名，或配 Key 后让我全网抽一首。`,
+    message: `歌单里没找到专辑${label}的曲目${scanWarn}。可以说具体歌名，或配 Key 后让我全网抽一首。`,
   };
 }
 
@@ -384,7 +412,8 @@ export async function searchLibraryArtist(sessionKey, query) {
   }
 
   const scanKey = `artist:${raw}`;
-  const tracks = await loadLibraryTracks(sessionKey, scanKey);
+  const loaded = await loadLibraryTracks(sessionKey, scanKey);
+  const tracks = loaded.tracks;
   const picked = pickArtistTrack(tracks, artist);
   if (picked) {
     return {
@@ -395,10 +424,14 @@ export async function searchLibraryArtist(sessionKey, query) {
     };
   }
 
+  // 第 3 项：加深扫描后仍没命中且歌单没扫全 → 提示可能未扫全，别误判为"没有"
+  const scanWarn = loaded.scannedPlaylists > 0 && loaded.scannedPlaylists < loaded.totalPlaylists
+    ? `（已扫前 ${loaded.scannedPlaylists}/${loaded.totalPlaylists} 个歌单，可能未扫全）`
+    : '';
   return {
     track: null,
     matches: [],
     clarify: true,
-    message: `歌单里没有 ${artist} 的歌。可以说具体歌名，或配 Key 后让我全网抽一首。`,
+    message: `歌单里没有 ${artist} 的歌${scanWarn}。可以说具体歌名，或配 Key 后让我全网抽一首。`,
   };
 }
