@@ -97,6 +97,12 @@ function createMainWindow() {
     },
   });
   mainWindow.loadURL(BACKEND_URL);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
   return mainWindow;
 }

@@ -1,9 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Radio } from 'lucide-react';
+import { Send, Radio, KeyRound } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { usePulseBands, usePulseFocus } from '../../context/PulseContext';
 import type { OrbitRotation } from '../../hooks/useSpatialOrbit';
 import CoverThumb from '../ui/CoverThumb';
+import ApiKeyModal from '../chat/ApiKeyModal';
+import { fetchDeepseekStatus } from '../../services/aiSettingsApi';
 import type { AIMessage } from '../layout/SpatialLayout';
 
 interface Props {
@@ -78,9 +80,17 @@ export default function SignalColumn({
   parallax = { x: 0, y: 0 },
 }: Props) {
   const [input, setInput] = useState('');
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { focus } = usePulseFocus();
   const bands = usePulseBands();
+
+  useEffect(() => {
+    void fetchDeepseekStatus()
+      .then((s) => setKeyConfigured(s.configured))
+      .catch(() => setKeyConfigured(false));
+  }, [visible]);
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -96,7 +106,6 @@ export default function SignalColumn({
 
   return (
     <>
-      {/* Collapsed edge hint — clickable */}
       <AnimatePresence>
         {!visible && (
           <motion.button
@@ -141,7 +150,6 @@ export default function SignalColumn({
               }}
               transition={{ type: 'spring', stiffness: 170, damping: 26, mass: 0.85 }}
             >
-              {/* Header — signal lock + spectrum */}
               <div className="flex items-center justify-between mb-3 shrink-0">
                 <div className="flex items-center gap-2.5">
                   <motion.div
@@ -154,10 +162,35 @@ export default function SignalColumn({
                   />
                   <span className="text-white/40 text-[10px] tracking-[2px] uppercase">Signal</span>
                 </div>
-                <SignalBars />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setKeyOpen(true)}
+                    title={keyConfigured ? 'API Key 已配置' : '导入 API Key'}
+                    aria-label="导入 API Key"
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[9px] tracking-wide transition-colors ${
+                      keyConfigured
+                        ? 'text-emerald-300/70 hover:text-emerald-200/90'
+                        : 'text-amber-200/70 hover:text-amber-100 bg-amber-400/10'
+                    }`}
+                  >
+                    <KeyRound size={12} />
+                    {keyConfigured ? 'Key' : '导入 Key'}
+                  </button>
+                  <SignalBars />
+                </div>
               </div>
 
-              {/* Focus lock — current cover / stack preview */}
+              {keyConfigured === false && (
+                <button
+                  type="button"
+                  onClick={() => setKeyOpen(true)}
+                  className="mb-3 shrink-0 w-full text-left rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2 text-[11px] text-amber-100/70 hover:bg-amber-400/10 transition-colors"
+                >
+                  未配置 DeepSeek Key — 点此导入。不配也可点歌：先登录，仅限歌单内。
+                </button>
+              )}
+
               {focus.cover && (
                 <div className="flex items-center gap-2.5 mb-3 shrink-0 px-0.5">
                   <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-white/[0.08] shrink-0">
@@ -184,7 +217,6 @@ export default function SignalColumn({
 
               <div className="h-px bg-gradient-to-r from-white/10 via-white/5 to-transparent mb-3 shrink-0" />
 
-              {/* Signal stream */}
               <div className="flex-1 overflow-y-auto space-y-3 mb-4 min-h-0">
                 {messages.length === 0 && (
                   <div className="text-white/15 text-xs text-center pt-12 font-light tracking-wide">
@@ -204,14 +236,18 @@ export default function SignalColumn({
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[9px] tracking-[1.5px] uppercase text-white/20">
+                      <span
+                        className={`text-[9px] tracking-[1.5px] uppercase ${
+                          msg.role === 'ai' ? 'text-white/25' : 'text-white/40'
+                        }`}
+                      >
                         {msg.role === 'ai' ? 'RX' : 'TX'}
                       </span>
-                       <span className="text-[9px] text-white/10 tabular-nums">{formatSignalTime(msg.id)}</span>
+                       <span className="text-[9px] text-white/20 tabular-nums">{formatSignalTime(msg.id)}</span>
                     </div>
                     <p
                       className={`text-sm leading-relaxed ${
-                        msg.role === 'ai' ? 'text-blue-300/55' : 'text-white/38'
+                        msg.role === 'ai' ? 'text-blue-200/70' : 'text-white/80'
                       }`}
                     >
                       {msg.text}
@@ -221,7 +257,6 @@ export default function SignalColumn({
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Band readout */}
               <div className="flex items-center gap-3 mb-3 shrink-0 px-0.5">
                 {(['bass', 'mid', 'treble'] as const).map(band => {
                   const gamma = band === 'treble' ? 1.55 : band === 'mid' ? 1.45 : 1.38;
@@ -243,7 +278,6 @@ export default function SignalColumn({
 
               <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mb-3 shrink-0" />
 
-              {/* Transmit input */}
               <div className="flex items-center gap-2 shrink-0">
                 <input
                   type="text"
@@ -251,7 +285,7 @@ export default function SignalColumn({
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSend()}
                   placeholder="transmit..."
-                  className="flex-1 bg-transparent border-b border-white/[0.08] px-1 py-2 text-white/45 text-sm placeholder:text-white/12 focus:outline-none focus:border-white/20 transition-colors duration-500"
+                  className="flex-1 bg-transparent border-b border-white/[0.08] px-1 py-2 text-white/80 text-sm placeholder:text-white/25 focus:outline-none focus:border-white/20 transition-colors duration-500"
                 />
                 <button
                   onClick={handleSend}
@@ -264,6 +298,12 @@ export default function SignalColumn({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ApiKeyModal
+        open={keyOpen}
+        onClose={() => setKeyOpen(false)}
+        onSaved={(s) => setKeyConfigured(s.configured)}
+      />
     </>
   );
 }

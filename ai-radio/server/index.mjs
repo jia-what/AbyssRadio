@@ -5,6 +5,8 @@ import { Readable } from 'stream';
 import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie, isPlayableUrl } from './ncm.mjs';
 import { getUrlNeteaseSmart } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
+import { getDeepseekStatus, setDeepseekApiKey } from './settings.mjs';
+import { searchLibrary, clearLibraryCache } from './librarySearch.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
 import { verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
 import { verifyKugouCookie, getKugouPlaylistsByCookie, getKugouTracksByCookie, getKugouPlayUrl } from './kugou.mjs';
@@ -250,6 +252,41 @@ app.post('/api/chat', express.json(), async function(req, res) {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+/** DeepSeek API Key status (no secret leaked beyond hint). */
+app.get('/api/settings/deepseek', function(_req, res) {
+  res.json(getDeepseekStatus());
+});
+
+/** Save / clear DeepSeek API Key — hot-reloads in-process. */
+app.post('/api/settings/deepseek', express.json(), function(req, res) {
+  const key = req.body?.key;
+  if (key === undefined || key === null) {
+    return res.status(400).json({ error: 'missing key (pass empty string to clear)' });
+  }
+  const result = setDeepseekApiKey(String(key));
+  res.json(result);
+});
+
+/**
+ * Point-song within bound playlists only (no global search).
+ * body: { key: sessionKey, q: query }
+ */
+app.post('/api/library/search', express.json(), async function(req, res) {
+  const key = req.body?.key || req.body?.sessionKey || '';
+  const q = req.body?.q || req.body?.query || '';
+  try {
+    const result = await searchLibrary(key, q);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message, track: null, matches: [], message: e.message });
+  }
+});
+
+app.post('/api/library/cache/clear', express.json(), function(req, res) {
+  clearLibraryCache(req.body?.key || '');
+  res.json({ ok: true });
 });
 
 // ===== Stable control plane (Jarvis / external) — { code, data, msg } =====

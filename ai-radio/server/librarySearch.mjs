@@ -1,0 +1,265 @@
+/**
+ * Search tracks inside the user's bound playlists (no DeepSeek / no global search).
+ * Progressive scan: keep fetching playlists until a strong title hit, not only top N.
+ */
+import { getSession, ensureFreshSession } from './session.mjs';
+import { getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
+import { getKugouPlaylistsByCookie, getKugouTracksByCookie } from './kugou.mjs';
+
+const cache = new Map(); // key -> { at, tracks }
+const CACHE_MS = 5 * 60 * 1000;
+const MAX_PLAYLISTS = 40;
+const MAX_TRACKS = 3000;
+/** Reject weak / artist-only noise. */
+const MIN_SCORE = 50;
+/** Strong enough to stop scanning more playlists. */
+const EARLY_HIT = 88;
+
+const STOP = new Set([
+  'by', 'the', 'a', 'an', 'feat', 'ft', 'featuring', 'with', 'and',
+  '的', '和', '与', '一首', '放', '听', 'play',
+]);
+
+function norm(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[（(].*?[）)]/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim();
+}
+
+function tokensOf(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[()[\]【】（）]/g, ' ')
+    .split(/[\s,/,&+\-–—]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !STOP.has(t));
+}
+
+/**
+ * Parse "luther by kendrick lamar" / "歌名 - 歌手" into title + artist.
+ */
+export function parseSongQuery(query) {
+  let raw = String(query || '').trim();
+  raw = raw.replace(/^(?:play|放|听|点歌)\s+/i, '').trim();
+  let titlePart = raw;
+  let artistPart = '';
+  const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
+  if (by) {
+    titlePart = by[1].trim();
+    artistPart = by[2].trim();
+  } else {
+    const dash = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+    if (dash) {
+      titlePart = dash[1].trim();
+      artistPart = dash[2].trim();
+    }
+  }
+  return { titlePart, artistPart, raw };
+}
+
+function scoreInterpretation(track, titlePart, artistPart) {
+  const title = norm(track.title);
+  const artist = norm(track.artist);
+  const qTitle = norm(titlePart);
+  if (!qTitle || !title) return 0;
+
+  let titleScore = 0;
+  if (title === qTitle) {
+    titleScore = 100;
+  } else if (title.startsWith(qTitle) || (qTitle.length >= 3 && title.includes(qTitle))) {
+    titleScore = 88;
+  } else if (qTitle.length >= 3 && qTitle.includes(title) && title.length >= 3) {
+    titleScore = 75;
+  } else {
+    const tks = tokensOf(titlePart);
+    if (!tks.length) return 0;
+    const hits = tks.filter((t) => title.includes(norm(t)));
+    if (!hits.length) return 0;
+    if (!title.includes(norm(tks[0]))) return 0;
+    if (hits.length < tks.length) return 0;
+    titleScore = 72;
+  }
+
+  let bonus = 0;
+  if (artistPart) {
+    const atks = tokensOf(artistPart);
+    if (atks.length) {
+      const aHits = atks.filter((t) => artist.includes(norm(t)));
+      if (!aHits.length) bonus -= 35;
+      else bonus += Math.round(28 * (aHits.length / atks.length));
+    }
+  }
+
+  const blob = `${track.title} ${track.artist}`.toLowerCase();
+  if (/翻唱|cover|piano|ringtone|karaoke|伴奏|remix|夜芯|软软/.test(blob)) {
+    bonus -= 25;
+  }
+
+  return titleScore + bonus;
+}
+
+export function scoreTrack(track, query) {
+  const parsed = parseSongQuery(query);
+  if (!parsed.raw) return 0;
+
+  const interps = [parsed];
+
+  if (!parsed.artistPart) {
+    const toks = tokensOf(parsed.raw);
+    if (toks.length >= 1) {
+      interps.push({ titlePart: toks[0], artistPart: '', raw: parsed.raw });
+    }
+    for (let i = 1; i <= Math.min(3, Math.max(0, toks.length - 1)); i++) {
+      interps.push({
+        titlePart: toks.slice(0, i).join(' '),
+        artistPart: toks.slice(i).join(' '),
+        raw: parsed.raw,
+      });
+    }
+  }
+
+  let best = 0;
+  for (const it of interps) {
+    const s = scoreInterpretation(track, it.titlePart, it.artistPart);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
+function playlistPriority(name) {
+  const n = String(name || '').toLowerCase();
+  if (/喜欢|我喜欢|红心|liked|favorite|favourite|love/.test(n)) return 0;
+  if (/收藏|日推|私人|radar|每日/.test(n)) return 1;
+  return 2;
+}
+
+function rankTracks(tracks, query) {
+  return tracks
+    .map((t) => ({ t, s: scoreTrack(t, query) }))
+    .filter((x) => x.s >= MIN_SCORE)
+    .sort((a, b) => b.s - a.s);
+}
+
+async function fetchPlaylistTracks(session, cookie, pl) {
+  if (session.platform === 'netease') {
+    return getNeteaseTracksByCookie(pl.id, cookie);
+  }
+  const result = await getKugouTracksByCookie(pl.id, cookie);
+  return result.tracks || [];
+}
+
+/**
+ * Load / refresh library. When `query` is set, stop early on a strong title hit
+ * so songs deep in the list are still found without always pulling everything.
+ */
+async function loadLibraryTracks(sessionKey, query) {
+  const fresh = await ensureFreshSession(sessionKey);
+  const session = fresh?.session;
+  if (!session) throw new Error('会话已失效，请重新扫码登录');
+  const cookie = fresh.cookie;
+  const cached = cache.get(sessionKey);
+  if (cached && Date.now() - cached.at < CACHE_MS) {
+    if (!query) return cached.tracks;
+    const hit = rankTracks(cached.tracks, query);
+    if (hit.length && hit[0].s >= EARLY_HIT) return cached.tracks;
+    // weak / miss in cache → keep scanning more playlists below
+  }
+
+  let playlists = [];
+  if (session.platform === 'netease') {
+    playlists = await getNeteasePlaylistsByCookie(cookie);
+  } else if (session.platform === 'kugou') {
+    const result = await getKugouPlaylistsByCookie(cookie);
+    playlists = result.playlists || [];
+  } else {
+    throw new Error('unsupported platform');
+  }
+
+  playlists = [...playlists].sort(
+    (a, b) => playlistPriority(a.name) - playlistPriority(b.name),
+  );
+
+  const tracks = cached && Date.now() - cached.at < CACHE_MS
+    ? [...cached.tracks]
+    : [];
+  const seen = new Set(tracks.map((t) => String(t.id)));
+  let bestScore = query ? (rankTracks(tracks, query)[0]?.s || 0) : 0;
+
+  for (const pl of playlists.slice(0, MAX_PLAYLISTS)) {
+    if (tracks.length >= MAX_TRACKS) break;
+    if (query && bestScore >= EARLY_HIT) break;
+    try {
+      const list = await fetchPlaylistTracks(session, cookie, pl);
+      for (const t of list) {
+        const id = String(t.id);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const row = {
+          id,
+          title: t.title || '',
+          artist: t.artist || '',
+          cover: t.cover || '',
+          duration: t.duration || 0,
+          source: t.source || session.platform,
+        };
+        tracks.push(row);
+        if (query) {
+          const s = scoreTrack(row, query);
+          if (s > bestScore) bestScore = s;
+        }
+        if (tracks.length >= MAX_TRACKS) break;
+      }
+    } catch (e) {
+      console.warn('[abyss] library playlist fetch failed:', pl.id, e.message);
+    }
+  }
+
+  cache.set(sessionKey, { at: Date.now(), tracks });
+  return tracks;
+}
+
+/** Invalidate cache after re-login / playlist change. */
+export function clearLibraryCache(sessionKey) {
+  if (sessionKey) cache.delete(sessionKey);
+  else cache.clear();
+}
+
+/**
+ * @returns {{ track: object|null, matches: object[], message: string }}
+ */
+export async function searchLibrary(sessionKey, query) {
+  if (!sessionKey) {
+    return { track: null, matches: [], message: '请先在右侧扫码登录，才能在歌单里点歌。' };
+  }
+  if (!getSession(sessionKey)) {
+    return { track: null, matches: [], message: '会话已失效，请重新扫码登录。' };
+  }
+  const q = String(query || '').trim();
+  const tracks = await loadLibraryTracks(sessionKey, q || null);
+  if (!tracks.length) {
+    return { track: null, matches: [], message: '歌单是空的，先去平台加几首歌再来点。' };
+  }
+
+  if (!q) {
+    const track = tracks[Math.floor(Math.random() * tracks.length)];
+    return { track, matches: [track], message: `从你的歌单里抽了一首：${track.title}` };
+  }
+
+  const ranked = rankTracks(tracks, q).slice(0, 5).map((x) => x.t);
+
+  if (!ranked.length) {
+    return {
+      track: null,
+      matches: [],
+      message: `歌单里没找到「${q}」。配 DeepSeek Key 可搜全库，或先把歌加进歌单。`,
+    };
+  }
+  const track = ranked[0];
+  return {
+    track,
+    matches: ranked,
+    message: `在歌单里找到了：${track.title} — ${track.artist}`,
+  };
+}

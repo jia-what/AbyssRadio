@@ -10,6 +10,44 @@ import { PulseProvider } from './context/PulseContext';
 import { useRadioState } from './hooks/useRadioState';
 import { useParticleCamera } from './hooks/useParticleCamera';
 import { loadCoverPalette, paletteToWaveColors, type CoverPalette } from './utils/coverPalette';
+import { loadStoredBind } from './services/playlistApi';
+import { searchLibrary } from './services/aiSettingsApi';
+
+function extractSongQuery(text: string): string | null {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  // 纯切歌，无搜索词
+  if (/^(?:换一首|换歌|下一首|换一下|随便来一首|来一首|随便放一首)$/i.test(raw)) {
+    return '';
+  }
+
+  const stripTail = (q: string) =>
+    q
+      .replace(/(?:听一下|来听听?|听听|播放|放一下|吧|呗|啊|呀|哦)+$/u, '')
+      .replace(/[。！？.!?]+$/g, '')
+      .trim();
+
+  // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
+  // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
+  const head = raw.match(
+    /^(?:play\s+|放(?:一?首)?|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
+  );
+  if (head) {
+    const q = stripTail(head[1]);
+    // 「放」单独不成点歌；「放一首」无歌名 → 空=切歌
+    return q;
+  }
+
+  const cleanMatch = raw.match(/换(?:一首)?(.+?)(?:歌|听听)?$/);
+  if (cleanMatch && cleanMatch[1].trim()) return stripTail(cleanMatch[1]);
+
+  // 句中点歌：「帮我放一首 X」
+  const mid = raw.match(/(?:帮我|给我|请)?放(?:一?首)(.+)$/i);
+  if (mid) return stripTail(mid[1]);
+
+  return null;
+}
 
 export default function App() {
   // 待机默认入口：主场景延后挂载，避免开局同时起 3 套 WebGL（环/按钮/封面粒子）卡顿。
@@ -26,10 +64,98 @@ export default function App() {
     isPlaying, messages, togglePlay, playNext, playPrev, addChatMessage,
     isPortaling, endPortal, currentTrack, progress, duration, currentTime,
     volume, isMuted, seek, setVolumeValue, toggleMute, searchAndPlay, playPlaylist,
+    insertAndPlay, searchAndInsertPlay, findInQueue,
     trackLyrics, lyricIndex, lyricLines, realDuration, audioRef, pulseAnalyserRef, beatAnalyserRef, isDemoPlayback,
     translationLines, lyricMode, setLyricMode, trialInfo,
   } = useRadioState();
 
+  /**
+   * AI 点歌策略：
+   * 1) 未登录 → 引导登录（不再全网搜，避免 VIP 30s 试听）
+   * 2) 已登录 → 先搜用户歌单（优先原曲/已收藏）
+   * 3) 歌单没有且 allowGlobal → 再全网搜索
+   */
+  const playSongForAi = useCallback(async (
+    query: string,
+    opts: { allowGlobal?: boolean } = {},
+  ) => {
+    const allowGlobal = opts.allowGlobal === true;
+    const bind = loadStoredBind();
+
+    if (!bind?.sessionKey) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: '请先在右侧扫码登录。登录后我会优先从你的歌单点歌，完整播放、少翻唱。',
+      });
+      return false;
+    }
+
+    const q = String(query || '').trim();
+    if (!q) {
+      playNext();
+      return true;
+    }
+
+    try {
+      // 1) 当前播放队列（右侧正在听的那张歌单）—— id/source 最准
+      const queued = findInQueue(q);
+      if (queued) {
+        insertAndPlay(queued, bind.sessionKey);
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: `◉  在当前歌单找到了：${queued.title} — ${queued.artist}（插播）`,
+        });
+        return true;
+      }
+
+      // 2) 后端扫登录账号下的歌单曲库
+      const lib = await searchLibrary(bind.sessionKey, q);
+      if (lib.track) {
+        insertAndPlay(lib.track, bind.sessionKey);
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: `◉  ${lib.message}（插播，下一首回原歌单）`,
+        });
+        return true;
+      }
+
+      // 3) 全网兜底（容易同名错源；仅 Key 点歌路径）
+      if (allowGlobal) {
+        const found = await searchAndInsertPlay(q, bind.sessionKey);
+        if (found) {
+          addChatMessage({
+            id: (Date.now() + 2).toString(),
+            role: 'ai',
+            text: `◉  歌单未命中，插播 — ${found.title} by ${found.artist}（下一首回原歌单）`,
+          });
+          return true;
+        }
+        addChatMessage({
+          id: (Date.now() + 2).toString(),
+          role: 'ai',
+          text: lib.message || `没找到与「${q}」歌名匹配的曲目。若是专辑名，试试具体歌名（例如 Nonstop、God's Plan）。`,
+        });
+        return false;
+      }
+
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: lib.message || `歌单里没有「${q}」。导入 DeepSeek Key 后可搜全库。`,
+      });
+      return false;
+    } catch (e) {
+      addChatMessage({
+        id: (Date.now() + 2).toString(),
+        role: 'ai',
+        text: e instanceof Error ? e.message : '点歌失败，请稍后重试。',
+      });
+      return false;
+    }
+  }, [findInQueue, insertAndPlay, searchAndInsertPlay, playNext, addChatMessage]);
   const handleSend = async (text: string) => {
     addChatMessage({ id: Date.now().toString(), role: 'user', text });
 
@@ -46,6 +172,19 @@ export default function App() {
 
       if (res.ok) {
         const data = await res.json();
+
+        // No API key — library-only (must be logged in)
+        if (data.type === 'nokey') {
+          const query = extractSongQuery(text);
+          if (query !== null) {
+            addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: data.text });
+            setTimeout(() => { void playSongForAi(query, { allowGlobal: false }); }, 280);
+            return;
+          }
+          addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: data.text });
+          return;
+        }
+
         addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: data.text });
 
         if (data.type === 'skip') {
@@ -53,74 +192,39 @@ export default function App() {
           return;
         }
 
-        if (data.type === 'play' && data.songQuery) {
-          setTimeout(async () => {
-            const found = await searchAndPlay(data.songQuery);
-            if (found) {
-              addChatMessage({
-                id: (Date.now() + 2).toString(), role: 'ai',
-                text: `◉  Now playing — ${found.title} by ${found.artist}`,
-              });
-            }
+        if (data.type === 'play') {
+          // 用户原话里的歌名优先，避免模型从上下文乱加艺人（如多拼 SZA）
+          const userQ = extractSongQuery(text);
+          const q = (userQ && userQ.trim()) ? userQ.trim() : (data.songQuery || '');
+          setTimeout(() => {
+            void playSongForAi(q, { allowGlobal: true });
           }, 300);
           return;
         }
 
-        const songTriggers = ['play ', '放 ', '听 ', '点歌 ', '换一首', '换歌', '下一首', '换'];
-        const isSongReq = songTriggers.some(t => text.toLowerCase().includes(t));
-        if (isSongReq) {
-          let query = text;
-          const cleanMatch = text.match(/换(?:一首)?(.+?)(?:歌|听听)?$/);
-          if (cleanMatch && cleanMatch[1].trim()) {
-            query = cleanMatch[1].trim();
-          } else {
-            for (const t of songTriggers) {
-              const idx = text.toLowerCase().indexOf(t);
-              if (idx >= 0) {
-                const before = text.substring(0, idx);
-                const after = text.substring(idx + t.length);
-                if (!before.trim() || /[，。！？,\.!?]/.test(before.trim().slice(-1))) {
-                  query = after.trim();
-                  break;
-                }
-              }
-            }
-          }
-          if (query) {
-            setTimeout(async () => {
-              const found = await searchAndPlay(query);
-              if (found) {
-                addChatMessage({
-                  id: (Date.now() + 2).toString(), role: 'ai',
-                  text: `◉  Now playing — ${found.title} by ${found.artist}`,
-                });
-              }
-            }, 300);
-          } else {
-            playNext();
-          }
+        const query = extractSongQuery(text);
+        if (query !== null) {
+          setTimeout(() => {
+            void playSongForAi(query, { allowGlobal: true });
+          }, 300);
         }
         return;
       }
     } catch {
-      // ignore fetch errors
+      // fall through
     }
 
-    const songTriggers = ['play ', '放 ', '听 ', '点歌 '];
-    const isSongReq = songTriggers.some(t => text.toLowerCase().startsWith(t));
-    if (isSongReq) {
-      const query = text.replace(/^(play |放 |听 |点歌 )/i, '');
-      const found = await searchAndPlay(query);
-      addChatMessage({
-        id: (Date.now() + 2).toString(), role: 'ai',
-        text: found
-          ? `◉  Now playing — ${found.title} by ${found.artist}`
-          : `Sorry, I couldn't find that track.`,
-      });
+    const query = extractSongQuery(text);
+    if (query !== null) {
+      await playSongForAi(query, { allowGlobal: false });
     } else {
       setTimeout(() => {
-        addChatMessage({ id: (Date.now() + 1).toString(), role: 'ai', text: 'Signal received. Processing your request...' });
-      }, 600);
+        addChatMessage({
+          id: (Date.now() + 1).toString(),
+          role: 'ai',
+          text: '信号不稳。可点「导入 Key」配置 DeepSeek，或先登录后用「放 歌名」在歌单里点歌。',
+        });
+      }, 400);
     }
   };
 

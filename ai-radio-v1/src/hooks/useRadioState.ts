@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
+import { pickBestTrack, MIN_SONG_SCORE } from '../utils/songMatch';
 
 function searchResultToTrack(s: SearchResult): Track {
   return {
@@ -418,7 +419,6 @@ export function useRadioState() {
       trackIndexRef.current = 0;
       setCurrentTrackIndex(0);
       progressRef.current = 0; setProgress(0);
-      const first = results[0];
       // Skip to a random song from results instead of always playing the first
       const randomIndex = Math.floor(Math.random() * Math.min(tracks.length, 10));
       trackIndexRef.current = randomIndex;
@@ -428,6 +428,115 @@ export function useRadioState() {
       return tracks[randomIndex];
     } catch { return null; }
   }, [loadAndPlayTrack]);
+
+  /**
+   * 在当前播放队列里找歌（用户正在听的那张歌单），优先于后端扫库 / 全网。
+   * 命中则用队列里的 id+source，避免全网搜到「同名不同源」。
+   */
+  const findInQueue = useCallback((query: string) => {
+    const q = String(query || '').trim();
+    if (!q) return null;
+    const hit = pickBestTrack(playlistRef.current, q, MIN_SONG_SCORE);
+    if (!hit) return null;
+    const t = hit.track;
+    const source = trackSourcesRef.current[t.id];
+    if (!source) return null;
+    return {
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      cover: t.cover || '',
+      duration: t.duration || 200,
+      source,
+    };
+  }, []);
+
+  /**
+   * AI 插播：只把这一首插到当前曲后面并立刻播放；
+   * 下一首 / 播完仍回到原歌单顺序（不会整队替换成单曲或一堆翻唱）。
+   */
+  const insertAndPlay = useCallback((
+    track: { id: string; title: string; artist: string; cover: string; duration: number; source: string },
+    sessionKey?: string,
+  ): Track | null => {
+    if (!track?.id) return null;
+    if (sessionKey) sessionKeyRef.current = sessionKey;
+
+    const incoming: Track = {
+      id: track.id,
+      title: track.title,
+      artist: track.artist || 'Unknown',
+      cover: track.cover || '',
+      duration: track.duration || 200,
+    };
+    const source = track.source || 'netease';
+    const queue = [...playlistRef.current];
+    const sources = { ...trackSourcesRef.current, [incoming.id]: source };
+
+    let playIdx: number;
+    const existingIdx = queue.findIndex((t) => String(t.id) === String(incoming.id));
+    if (existingIdx >= 0) {
+      // Already in queue — jump there, keep order
+      playIdx = existingIdx;
+    } else if (queue.length === 0) {
+      queue.push(incoming);
+      playIdx = 0;
+    } else {
+      const cur = Math.max(0, Math.min(trackIndexRef.current, queue.length - 1));
+      queue.splice(cur + 1, 0, incoming);
+      playIdx = cur + 1;
+    }
+
+    cancelAnimationFrame(rafRef.current);
+    loadGenRef.current += 1;
+    const audio = audioRef.current;
+    if (audio) { audio.pause(); audio.src = ''; }
+
+    playlistRef.current = queue;
+    trackSourcesRef.current = sources;
+    setPlaylist(queue);
+    setTrackSources(sources);
+    setLyricLines([]);
+    setTranslationLines([]);
+    setTrialInfo(null);
+    setRealDuration(0);
+    trackIndexRef.current = playIdx;
+    setCurrentTrackIndex(playIdx);
+    progressRef.current = 0;
+    setProgress(0);
+
+    loadAndPlayTrack(incoming.id, source, `${incoming.artist}\t${incoming.title}`);
+    return incoming;
+  }, [loadAndPlayTrack]);
+
+  /** 全网搜一首最优结果并插播；歌名对不上宁可不播，绝不拿第一首凑数 */
+  const searchAndInsertPlay = useCallback(async (
+    query: string,
+    sessionKey?: string,
+  ): Promise<Track | null> => {
+    try {
+      const q = String(query || '').trim();
+      if (!q) return null;
+      const results = await searchMusic(q, 'both', 12);
+      if (!results || results.length === 0) return null;
+
+      // 与歌单同一套打分：必须歌名命中；禁止 fallback 到 results[0]
+      const hit = pickBestTrack(results, q, MIN_SONG_SCORE);
+      if (!hit) return null;
+
+      const chosen = hit.track;
+      return insertAndPlay({
+        id: chosen.id,
+        title: chosen.title,
+        artist: chosen.artist || '',
+        cover: chosen.cover || '',
+        duration: chosen.duration || 200,
+        source: chosen.source || 'netease',
+      }, sessionKey);
+    } catch {
+      return null;
+    }
+  }, [insertAndPlay]);
 
   // ===== Play a real playlist in order (queue = the playlist itself) =====
   const playPlaylist = useCallback((
@@ -518,7 +627,7 @@ export function useRadioState() {
     pulseAnalyserRef,
     beatAnalyserRef,
     togglePlay, playNext, playPrev, seek, seekToTime, setVolumeValue, toggleMute,
-    requestSong, searchAndPlay, playPlaylist,
+    requestSong, searchAndPlay, searchAndInsertPlay, insertAndPlay, findInQueue, playPlaylist,
     addChatMessage: (msg: { id: string; role: string; text: string }) => setMessages(prev => [...prev, msg]),
     endPortal: () => setIsPortaling(false),
   };
