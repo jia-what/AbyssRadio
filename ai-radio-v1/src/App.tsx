@@ -68,7 +68,7 @@ export default function App() {
     try {
       const lib = await searchLibrary(bind.sessionKey, q, 'album');
       if (lib.track) {
-        insertAndPlay(lib.track, bind.sessionKey);
+        insertAndPlay({ ...lib.track, ephemeral: true }, bind.sessionKey);
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
@@ -150,7 +150,7 @@ export default function App() {
       // 1) 歌单
       const lib = await searchLibrary(bind.sessionKey, q, 'artist');
       if (lib.track) {
-        insertAndPlay(lib.track, bind.sessionKey);
+        insertAndPlay({ ...lib.track, ephemeral: true }, bind.sessionKey);
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',
@@ -250,7 +250,7 @@ export default function App() {
       // 2) 后端扫登录账号下的歌单曲库
       const lib = await searchLibrary(bind.sessionKey, q);
       if (lib.track) {
-        insertAndPlay(lib.track, bind.sessionKey);
+        insertAndPlay({ ...lib.track, ephemeral: true }, bind.sessionKey);
         addChatMessage({
           id: (Date.now() + 2).toString(),
           role: 'ai',

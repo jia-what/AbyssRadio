@@ -313,11 +313,30 @@ export function useRadioState() {
 
   // Keep playNextRef in sync so audio.onended always calls latest
   const playNext = useCallback(() => {
-    const tracks = playlistRef.current;
+    let tracks = playlistRef.current;
     if (tracks.length === 0) return;
     const now = Date.now();
     if (now - lastAdvanceRef.current < 600) return;
     lastAdvanceRef.current = now;
+
+    // 第 10 项：播完/切走时清除插播曲（ephemeral），不留残留
+    if (tracks.some((t) => t.ephemeral)) {
+      const cur = playlistRef.current[trackIndexRef.current];
+      const nextId = playlistRef.current[(trackIndexRef.current + 1) % playlistRef.current.length]?.id;
+      tracks = tracks.filter((t) => !t.ephemeral);
+      playlistRef.current = tracks;
+      setPlaylist(tracks);
+      // 校正 index：当前曲还在 → 停在它上面（后面 +1 播下一首）；
+      // 当前曲是插播被清 → 停在 nextId 前一个位置，让后面 +1 正好播 nextId（不跳曲）
+      const curIdx = tracks.findIndex((t) => t.id === cur?.id);
+      if (curIdx >= 0) trackIndexRef.current = curIdx;
+      else {
+        const ni = tracks.findIndex((t) => t.id === nextId);
+        trackIndexRef.current = ni > 0 ? ni - 1 : tracks.length - 1;
+      }
+      setCurrentTrackIndex(trackIndexRef.current);
+      if (tracks.length === 0) return;
+    }
 
     cancelAnimationFrame(rafRef.current);
     loadGenRef.current += 1;
@@ -343,9 +362,22 @@ export function useRadioState() {
   useEffect(() => { playNextRef.current = playNext; }, [playNext]);
 
   const playPrev = useCallback(() => {
-    const tracks = playlistRef.current;
+    let tracks = playlistRef.current;
     if (tracks.length === 0) return;
     lastAdvanceRef.current = Date.now();
+
+    // 第 10 项：切走时清除插播曲（ephemeral），不留残留
+    if (tracks.some((t) => t.ephemeral)) {
+      const cur = playlistRef.current[trackIndexRef.current];
+      tracks = tracks.filter((t) => !t.ephemeral);
+      playlistRef.current = tracks;
+      setPlaylist(tracks);
+      const curIdx = tracks.findIndex((t) => t.id === cur?.id);
+      trackIndexRef.current = curIdx >= 0 ? curIdx : Math.max(0, Math.min(trackIndexRef.current, tracks.length - 1));
+      setCurrentTrackIndex(trackIndexRef.current);
+      if (tracks.length === 0) return;
+    }
+
     cancelAnimationFrame(rafRef.current);
     loadGenRef.current += 1;
     const prevIndex = (trackIndexRef.current - 1 + tracks.length) % tracks.length;
@@ -459,7 +491,7 @@ export function useRadioState() {
    * 下一首 / 播完仍回到原歌单顺序（不会整队替换成单曲或一堆翻唱）。
    */
   const insertAndPlay = useCallback((
-    track: { id: string; title: string; artist: string; cover: string; duration: number; source: string; fromLibrary?: boolean },
+    track: { id: string; title: string; artist: string; cover: string; duration: number; source: string; fromLibrary?: boolean; ephemeral?: boolean },
     sessionKey?: string,
   ): Track | null => {
     if (!track?.id) return null;
@@ -472,6 +504,7 @@ export function useRadioState() {
       cover: track.cover || '',
       duration: track.duration || 200,
       fromLibrary: track.fromLibrary,
+      ephemeral: track.ephemeral,
     };
     const source = track.source || 'netease';
     const queue = [...playlistRef.current];
@@ -546,6 +579,7 @@ export function useRadioState() {
       duration: chosen.duration || t.duration || 200,
       source: (chosen as { source?: string }).source || t.source || 'netease',
       fromLibrary,
+      ephemeral: true,
     }, sessionKey);
   }, [insertAndPlay]);
 
