@@ -5,7 +5,7 @@ import { Readable } from 'stream';
 import { searchBoth, searchNetease, searchKuGou, getUrl, getUrlSmart, getLyric, getKugouUrlWithCookie, isPlayableUrl } from './ncm.mjs';
 import { getUrlNeteaseSmart } from './ncm-neapi.mjs';
 import { chatWithDeepSeek } from './deepseek.mjs';
-import { getDeepseekStatus, setDeepseekApiKey } from './settings.mjs';
+import { getDeepseekStatus, setDeepseekApiKey, pingDeepseekKey } from './settings.mjs';
 import { searchLibrary, clearLibraryCache, searchLibraryAlbum, searchLibraryArtist } from './librarySearch.mjs';
 import { addPlayHistory, getPlayHistory, toggleLike, getLikedSongs, isLiked } from './db.mjs';
 import { verifyNeteaseCookie, getNeteasePlaylistsByCookie, getNeteaseTracksByCookie } from './login.mjs';
@@ -260,13 +260,24 @@ app.get('/api/settings/deepseek', function(_req, res) {
 });
 
 /** Save / clear DeepSeek API Key — hot-reloads in-process. */
-app.post('/api/settings/deepseek', express.json(), function(req, res) {
+app.post('/api/settings/deepseek', express.json(), async function(req, res) {
   const key = req.body?.key;
   if (key === undefined || key === null) {
     return res.status(400).json({ error: 'missing key (pass empty string to clear)' });
   }
+  // 第 14 项：清空直接过；保存前 ping 验证 Key 有效（无效不落盘）
+  if (String(key).trim()) {
+    const ping = await pingDeepseekKey(key);
+    if (!ping.valid) {
+      return res.status(400).json({
+        error: ping.reason || 'Key 验证失败',
+        ping,
+        configured: false,
+      });
+    }
+  }
   const result = setDeepseekApiKey(String(key));
-  res.json(result);
+  res.json({ ...result, ping: 'ok' });
 });
 
 /**

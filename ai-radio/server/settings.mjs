@@ -75,3 +75,38 @@ export function getDeepseekStatus() {
     docsUrl: 'https://api-docs.deepseek.com',
   };
 }
+
+/**
+ * 第 14 项：保存前 ping 一次 DeepSeek API 验证 Key 有效。
+ * 用极小的 max_tokens 请求探测 401/403；返回 { valid, status }。
+ */
+export async function pingDeepseekKey(key) {
+  const apiKey = String(key || '').trim();
+  if (!apiKey) return { valid: false, status: 'empty' };
+  try {
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+    });
+    if (res.ok) return { valid: true, status: res.status };
+    if (res.status === 401 || res.status === 403) {
+      return { valid: false, status: res.status, reason: 'Key 无效或已失效' };
+    }
+    // 402 余额不足等：Key 本身有效，但被限额
+    if (res.status === 402) {
+      return { valid: true, status: res.status, reason: 'Key 有效但余额不足' };
+    }
+    return { valid: false, status: res.status, reason: `HTTP ${res.status}` };
+  } catch (e) {
+    return { valid: false, status: 'error', reason: e.message };
+  }
+}
