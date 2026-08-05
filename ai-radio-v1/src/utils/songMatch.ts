@@ -70,18 +70,18 @@ function scoreInterpretation(
   let titleScore = 0;
   if (title === qTitle) {
     titleScore = 100;
-  } else if (title.startsWith(qTitle) || (qTitle.length >= 3 && title.includes(qTitle))) {
+  } else if (qTitle.length >= 3 && title.startsWith(qTitle)) {
+    // 前缀命中: "let go" → "let go (explicit)"（仍是同一首）
     titleScore = 88;
-  } else if (qTitle.length >= 3 && qTitle.includes(title) && title.length >= 3) {
-    titleScore = 75;
   } else {
-    const tks = tokensOf(titlePart);
-    if (!tks.length) return 0;
-    const hits = tks.filter((t) => title.includes(norm(t)));
-    if (!hits.length) return 0;
-    if (!title.includes(norm(tks[0]))) return 0;
-    if (hits.length < tks.length) return 0;
-    titleScore = 72;
+    // 主C：词级全命中才算（修 "let go" → violet 藏 let 子串的错配）
+    const qTks = tokensOf(titlePart);
+    const tTks = tokensOf(track.title || '').map((x) => norm(x));
+    if (qTks.length && tTks.length && qTks.every((t) => tTks.includes(norm(t)))) {
+      titleScore = 88;
+    } else {
+      return 0;
+    }
   }
 
   let bonus = 0;
@@ -115,9 +115,7 @@ export function scoreTrack(
 
   if (!parsed.artistPart) {
     const toks = tokensOf(parsed.raw);
-    if (toks.length >= 1) {
-      interps.push({ titlePart: toks[0], artistPart: '' });
-    }
+    // 主C: 不把首 token 单独当歌名解 (修 "let go" → 匹配 Let It Bloom / Violet)
     for (let i = 1; i <= Math.min(3, Math.max(0, toks.length - 1)); i++) {
       interps.push({
         titlePart: toks.slice(0, i).join(' '),
