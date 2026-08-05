@@ -36,13 +36,40 @@ const SYSTEM_PROMPT = `你是一个AI电台DJ，名叫Abyss。你的风格是深
 6. 回复简短，PLAY: 行之外最多一两句。`;
 
 /**
+ * 无 Key 时的模板闲聊（第 8 项）：不装 AI，但至少有反应；点歌已由前端本地解析，
+ * 这里只接纯聊天。关键词匹配几类常用话术，顺带引导导 Key。
+ */
+function templateReply(userMessage) {
+  const msg = String(userMessage || '').trim().toLowerCase();
+  const keyHint = '导入 DeepSeek Key 后，我才能陪你真正聊下去。';
+
+  if (/你好|hi|hello|嗨|哈喽/.test(msg)) {
+    return `你好呀。现在还没配 DeepSeek Key，我只能当个点歌台。${keyHint}`;
+  }
+  if (/好听|喜欢|爱了|上瘾|单曲循环/.test(msg)) {
+    return '这首歌确实顶。想换点别的就说「放 歌名」，你的歌单里都能找。';
+  }
+  if (/不好听|难听|什么鬼|拉黑/.test(msg)) {
+    return '哈哈哈哈换一首！说「放 歌名」或「换一首」都行。';
+  }
+  if (/为什么|怎么|啥|吗|呢|？|\?/.test(msg)) {
+    return `这问题我得有脑子才能答。${keyHint} 不配 Key 时，直接说「放 歌名」我照样给你放。`;
+  }
+  if (/推荐|有什么歌|歌单/.test(msg)) {
+    return '想听就说「放 歌名」，或者「放 XX 的歌 / 放 XX 专辑」，我都能从你的歌单里抽。';
+  }
+  return `信号收到了，但我现在没联网的脑子（没配 Key）。${keyHint} 点歌不受影响：说「放 歌名」就行。`;
+}
+
+/**
  * Send a message to DeepSeek and get AI DJ response.
  */
 export async function chatWithDeepSeek(userMessage, messageHistory, currentTrack) {
   if (!hasDeepseekApiKey()) {
     return {
       type: 'nokey',
-      text: '还没有配置 DeepSeek API Key。点左侧「导入 Key」粘贴后即可畅聊；不配 Key 也能点歌，但需先登录，且只会在你的歌单里找。',
+      text: templateReply(userMessage),
+      template: true,
     };
   }
 
