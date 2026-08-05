@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
 import { searchLibrary } from '../services/aiSettingsApi';
+import { loadStoredBind } from '../services/playlistApi';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 import { pickBestTrack, parseSongQuery, MIN_SONG_SCORE, expandAliases } from '../utils/songMatch';
 import { parseAlbumQuery, pickAlbumTrack } from '../utils/albumPlay';
@@ -612,7 +613,18 @@ export function useRadioState() {
       // 拆词：搜「歌名」，艺人只做硬过滤（修 "HABIBTI by Drake" 整串搜索搜不到）
       const { titlePart, artistPart } = parseSongQuery(q);
       const searchTerm = titlePart || q;
-      const results = await searchMusic(searchTerm, 'both', 12);
+
+      // 优先登录平台的源（酷狗会员 → 先搜酷狗 → 取流走会员 cookie → VIP 完整播放）；
+      // 没命中再 both 兜底（修 VIP 歌 30s：此前 both 可能选中网易云源，但 session 是酷狗，
+      // url-smart 拿网易云 id 去酷狗取流必然失败 → 兜底回 30s 试听）
+      let results: SearchResult[] = [];
+      const bindPlatform = loadStoredBind()?.platform;
+      if (bindPlatform === 'kugou' || bindPlatform === 'netease') {
+        results = await searchMusic(searchTerm, bindPlatform, 12);
+      }
+      if (!results || results.length === 0) {
+        results = await searchMusic(searchTerm, 'both', 12);
+      }
       if (!results || results.length === 0) return null;
 
       // 同名歧义检测：与查询同名的候选里出现多个不同艺人 → 不猜，交上层澄清
