@@ -119,7 +119,9 @@ export default function App() {
           addChatMessage({
             id: (Date.now() + 2).toString(),
             role: 'ai',
-            text: `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（插播）`,
+            text: found.track.fromLibrary
+              ? `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（换成你歌单的版本，插播）`
+              : `◉  从专辑「${found.album}」抽了一首 — ${found.track.title} by ${found.track.artist}（非歌单源，插播）`,
           });
           return true;
         }
@@ -200,7 +202,9 @@ export default function App() {
           addChatMessage({
             id: (Date.now() + 2).toString(),
             role: 'ai',
-            text: `◉  歌单里没有 ${artist} 的歌，从全网抽了一首 — ${found.title} by ${found.artist}（插播）`,
+            text: found.fromLibrary
+              ? `◉  歌单里没有 ${artist} 的歌，从全网找到同曲并换成你歌单的版本 — ${found.title} by ${found.artist}（插播）`
+              : `◉  歌单里没有 ${artist} 的歌，从全网抽了一首 — ${found.title} by ${found.artist}（非歌单源，插播）`,
           });
           return true;
         }
@@ -307,7 +311,9 @@ export default function App() {
           addChatMessage({
             id: (Date.now() + 2).toString(),
             role: 'ai',
-            text: `◉  歌单未命中，插播 — ${found.title} by ${found.artist}（下一首回原歌单）`,
+            text: found.fromLibrary
+              ? `◉  歌单未命中，从全网找到同曲并换成你歌单的版本 — ${found.title} by ${found.artist}（插播）`
+              : `◉  歌单未命中，全网插播 — ${found.title} by ${found.artist}（非歌单源，下一首回原歌单）`,
           });
           return true;
         }

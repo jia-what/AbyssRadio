@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Track } from '../types';
 import { searchMusic, getMusicUrl, getMusicLyric, type SearchResult } from '../services/api';
+import { searchLibrary } from '../services/aiSettingsApi';
 import { parseLRC, parseKRC, findLyricIndex, type LyricLine } from '../utils/parseLRC';
 import { pickBestTrack, parseSongQuery, MIN_SONG_SCORE } from '../utils/songMatch';
 import { parseAlbumQuery, pickAlbumTrack } from '../utils/albumPlay';
@@ -458,7 +459,7 @@ export function useRadioState() {
    * 下一首 / 播完仍回到原歌单顺序（不会整队替换成单曲或一堆翻唱）。
    */
   const insertAndPlay = useCallback((
-    track: { id: string; title: string; artist: string; cover: string; duration: number; source: string },
+    track: { id: string; title: string; artist: string; cover: string; duration: number; source: string; fromLibrary?: boolean },
     sessionKey?: string,
   ): Track | null => {
     if (!track?.id) return null;
@@ -470,6 +471,7 @@ export function useRadioState() {
       artist: track.artist || 'Unknown',
       cover: track.cover || '',
       duration: track.duration || 200,
+      fromLibrary: track.fromLibrary,
     };
     const source = track.source || 'netease';
     const queue = [...playlistRef.current];
@@ -511,6 +513,42 @@ export function useRadioState() {
     return incoming;
   }, [loadAndPlayTrack]);
 
+  /** 全网命中后回查歌单：同曲（歌名+艺人）在歌单里则换成歌单 id（音质/可播性更好），
+   *  否则保持全网源并标记 fromLibrary=false（第 4 项：全网错源） */
+  const resolveLibrarySource = useCallback(async (
+    t: { id: string; title: string; artist?: string; cover?: string; duration?: number; source?: string },
+    sessionKey?: string,
+  ): Promise<Track | null> => {
+    let fromLibrary = false;
+    let chosen = { ...t };
+    try {
+      if (sessionKey) {
+        const lib = await searchLibrary(sessionKey, `${t.title} by ${t.artist || ''}`, 'song');
+        if (lib.track) {
+          const lt = lib.track;
+          const norm = (s: string) => String(s || '').toLowerCase()
+            .replace(/[（(].*?[）)]/g, ' ')  // 剥 (Explicit) / (feat...) 等括号内容
+            .replace(/[^\p{L}\p{N}]+/gu, '');
+          if (norm(lt.title) === norm(t.title) && (norm(lt.artist).includes(norm(t.artist || '')) || norm(t.artist || '').includes(norm(lt.artist)))) {
+            chosen = { ...lt, duration: lt.duration || t.duration || 200 };
+            fromLibrary = true;
+          }
+        }
+      }
+    } catch {
+      // 回查失败不影响全网播放，保持原 track
+    }
+    return insertAndPlay({
+      id: chosen.id,
+      title: chosen.title,
+      artist: chosen.artist || '',
+      cover: chosen.cover || t.cover || '',
+      duration: chosen.duration || t.duration || 200,
+      source: (chosen as { source?: string }).source || t.source || 'netease',
+      fromLibrary,
+    }, sessionKey);
+  }, [insertAndPlay]);
+
   /** 全网搜一首最优结果并插播；歌名对不上宁可不播，绝不拿第一首凑数 */
   const searchAndInsertPlay = useCallback(async (
     query: string,
@@ -540,18 +578,12 @@ export function useRadioState() {
       if (!hit) return null;
 
       const chosen = hit.track;
-      return insertAndPlay({
-        id: chosen.id,
-        title: chosen.title,
-        artist: chosen.artist || '',
-        cover: chosen.cover || '',
-        duration: chosen.duration || 200,
-        source: chosen.source || 'netease',
-      }, sessionKey);
+      // 第 4 项：回查歌单，同曲换歌单 id；否则全网源 + fromLibrary=false
+      return resolveLibrarySource(chosen, sessionKey);
     } catch {
       return null;
     }
-  }, [insertAndPlay]);
+  }, [resolveLibrarySource]);
 
   /** 专辑抽曲：全网结果按 album 字段 / 提示曲目过滤，没把握则返回 null（由上层澄清） */
   const searchAndInsertAlbum = useCallback(async (
@@ -565,19 +597,13 @@ export function useRadioState() {
       if (!results?.length) return null;
       const chosen = pickAlbumTrack(results, album, artist);
       if (!chosen) return null;
-      const track = insertAndPlay({
-        id: chosen.id,
-        title: chosen.title,
-        artist: chosen.artist || '',
-        cover: chosen.cover || '',
-        duration: chosen.duration || 200,
-        source: chosen.source || 'netease',
-      }, sessionKey);
+      // 第 4 项：回查歌单，同曲换歌单 id
+      const track = await resolveLibrarySource(chosen, sessionKey);
       return track ? { track, album: album || raw } : null;
     } catch {
       return null;
     }
-  }, [insertAndPlay]);
+  }, [resolveLibrarySource]);
 
   /** 歌手级全网抽曲：搜歌手名，结果艺人必须命中，随机抽一首；无把握返回 null */
   const searchAndInsertArtist = useCallback(async (
@@ -591,18 +617,12 @@ export function useRadioState() {
       if (!results?.length) return null;
       const chosen = pickArtistTrack(results, artist);
       if (!chosen) return null;
-      return insertAndPlay({
-        id: chosen.id,
-        title: chosen.title,
-        artist: chosen.artist || '',
-        cover: chosen.cover || '',
-        duration: chosen.duration || 200,
-        source: chosen.source || 'netease',
-      }, sessionKey);
+      // 第 4 项：回查歌单，同曲换歌单 id
+      return resolveLibrarySource(chosen, sessionKey);
     } catch {
       return null;
     }
-  }, [insertAndPlay]);
+  }, [resolveLibrarySource]);
 
   // ===== Play a real playlist in order (queue = the playlist itself) =====
   const playPlaylist = useCallback((
