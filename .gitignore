@@ -9,6 +9,7 @@ build/
 .env
 .env.*
 *.local
+session-store.json
 
 # ===== Databases / local runtime data =====
 *.db
