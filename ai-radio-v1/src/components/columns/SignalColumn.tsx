@@ -257,13 +257,14 @@ export default function SignalColumn({
                 <div ref={chatEndRef} />
               </div>
 
-              <div className="flex items-center gap-3 mb-3 shrink-0 px-0.5">
+              <div className="flex items-center gap-3 mb-3 shrink-0 px-0.5" title="实时频段可视化，仅供视觉，不可调节">
                 {(['bass', 'mid', 'treble'] as const).map(band => {
                   const gamma = band === 'treble' ? 1.55 : band === 'mid' ? 1.45 : 1.38;
                   const level = signalMeter(bands[band], gamma);
+                  const label = band === 'bass' ? '低音' : band === 'mid' ? '中音' : '高音';
                   return (
                   <div key={band} className="flex-1">
-                    <div className="text-[8px] tracking-[1px] uppercase text-white/15 mb-1">{band}</div>
+                    <div className="text-[8px] tracking-[1px] uppercase text-white/15 mb-1">{label}</div>
                     <div className="h-[2px] bg-white/[0.04] rounded-full overflow-hidden">
                       <motion.div
                         className="h-full bg-blue-400/50 rounded-full origin-left"
@@ -274,6 +275,7 @@ export default function SignalColumn({
                   </div>
                   );
                 })}
+                <div className="text-[8px] text-white/10 tracking-wider shrink-0">实时频谱</div>
               </div>
 
               <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mb-3 shrink-0" />
