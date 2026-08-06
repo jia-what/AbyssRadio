@@ -525,6 +525,8 @@ export function useRadioState() {
       fromLibrary: track.fromLibrary,
       ephemeral: track.ephemeral,
     };
+    // 【临时诊断】insertAndPlay 收到的 cover
+    console.log('[cover-diag] insertAndPlay cover =', JSON.stringify(incoming.cover), '| id:', incoming.id.slice(0, 20));
     const source = track.source || 'netease';
     const queue = [...playlistRef.current];
     const sources = { ...trackSourcesRef.current, [incoming.id]: source };

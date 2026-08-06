@@ -293,6 +293,13 @@ export default function App() {
               ? `◉  歌单里没有，但找到了你歌单里的版本 — ${found.title} by ${found.artist}`
               : `◉  歌单里没这首，我全网找了一首 — ${found.title} by ${found.artist}`,
           });
+          // 【临时诊断】把 cover 实际值显示在聊天里(验证完删)
+          const diagCover = (found as { cover?: string }).cover || '(空!)';
+          addChatMessage({
+            id: (Date.now() + 3).toString(),
+            role: 'ai',
+            text: `【诊断】cover=${diagCover.slice(0, 80)}`,
+          });
           return true;
         }
       }

@@ -278,7 +278,10 @@ export default function CoverParticleField({
       crossFade: boolean,
       forKey: string,
     ) => {
-      if (forKey !== focusKeyOf()) return;
+      if (forKey !== focusKeyOf()) {
+        console.warn('[cover-diag] applyCoverTextures SKIP (focus changed)', { forKey, cur: focusKeyOf() });
+        return;
+      }
 
       const oldCover = coverTex;
       if (crossFade && hasCover > 0.5) {
@@ -309,6 +312,7 @@ export default function CoverParticleField({
       // 仅真图片 URL；渐变色字符串等假封面一律当无封面
       const proxied = rawUrl && isImageUrl(rawUrl) ? coverUrl(rawUrl) : '';
       if (!proxied) {
+        console.warn('[cover-diag] loadCover NO-URL', { rawUrl, forKey, cur: focusKeyOf() });
         if (forKey !== focusKeyOf()) return;
         hasCover = 0;
         hasDepth = 0;
@@ -320,19 +324,27 @@ export default function CoverParticleField({
 
       try {
         const img = await loadCoverImage(proxied);
-        if (disposed || token !== loadToken || forKey !== focusKeyOf()) return;
+        if (disposed || token !== loadToken || forKey !== focusKeyOf()) {
+          console.warn('[cover-diag] loadCover EARLY-RETURN', { disposed, token, loadToken, forKey, cur: focusKeyOf() });
+          return;
+        }
+        console.log('[cover-diag] loadCover IMG-OK', img.naturalWidth, 'x', img.naturalHeight);
         const coverCanvas = await createCoverCanvasFromImage(img);
         const edgeCanvas = buildEdgeAndDepth(coverCanvas);
-        if (disposed || token !== loadToken || forKey !== focusKeyOf()) return;
+        if (disposed || token !== loadToken || forKey !== focusKeyOf()) {
+          console.warn('[cover-diag] loadCover EARLY-RETURN2', { disposed, token, loadToken, forKey, cur: focusKeyOf() });
+          return;
+        }
         applyCoverTextures(coverCanvas, edgeCanvas, loadedFocusKey !== '' && hasCover > 0.5, forKey);
-      } catch {
+        console.log('[cover-diag] loadCover APPLIED hasCover=1');
+      } catch (e) {
+        console.error('[CoverParticleField] loadCover FAIL:', e, 'forKey:', forKey, 'rawUrl:', rawUrl);
         if (!disposed && token === loadToken && forKey === focusKeyOf()) {
           hasCover = 0;
           hasDepth = 0;
         }
       }
     };
-
     const syncFocus = () => {
       const next = focusKeyOf();
       if (next === focusKey) return;

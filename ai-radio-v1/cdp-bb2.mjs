@@ -1,0 +1,120 @@
+/* CDP: 读 BottomBar 封面元素 style + 主界面状态 */
+import fs from 'fs';
+const store = JSON.parse(fs.readFileSync('E:\\VM\\AI_audio\\ai-radio\\server\\session-store.json', 'utf8'));
+const kg = Object.entries(store).find(([, v]) => v.platform === 'kugou');
+const [sessionKey, info] = kg;
+const bind = JSON.stringify({ platform: 'kugou', sessionKey, user: info.user || { userId: '', nickname: '酷狗用户' } });
+
+const CDP = 'http://localhost:9333';
+let target;
+for (let i = 0; i < 10; i++) {
+  try { target = await (await fetch(CDP + '/json/new?about:blank', { method: 'PUT' })).json(); break; }
+  catch { await new Promise(r => setTimeout(r, 1500)); }
+}
+if (!target) { console.log('CDP 不可用'); process.exit(1); }
+const ws = new WebSocket(target.webSocketDebuggerUrl);
+let id = 0;
+const pending = new Map();
+const send = (method, params = {}) => new Promise((res, rej) => {
+  const mid = ++id;
+  pending.set(mid, { res, rej });
+  ws.send(JSON.stringify({ id: mid, method, params }));
+  setTimeout(() => { if (pending.has(mid)) { pending.delete(mid); rej(new Error('timeout ' + method)); } }, 20000);
+});
+ws.onmessage = (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.id && pending.has(msg.id)) { pending.get(msg.id).res(msg); pending.delete(msg.id); }
+};
+await new Promise((r) => (ws.onopen = r));
+await send('Runtime.enable').catch(() => {});
+await send('Page.enable').catch(() => {});
+
+const evalJs = async (expr) => {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }).catch(() => null);
+  if (!r || r.result?.exceptionDetails) return 'EXC: ' + (r.result?.exceptionDetails?.exception?.description || '').slice(0, 150);
+  return r.result?.result?.value;
+};
+
+await send('Page.navigate', { url: 'http://localhost:3000' }).catch(() => {});
+await new Promise((r) => setTimeout(r, 8000));
+await evalJs(`localStorage.setItem('ai-radio-bind', ${JSON.stringify(bind)}); 'ok'`);
+await send('Page.reload', { ignoreCache: true }).catch(() => {});
+await new Promise((r) => setTimeout(r, 10000));
+
+const btnRect = await evalJs(`(() => {
+  const el = [...document.querySelectorAll('button')].find(b => /点击进入/.test(b.textContent));
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+})()`);
+if (btnRect) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnRect.x, y: btnRect.y }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 400));
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnRect.x, y: btnRect.y, button: 'left', clickCount: 1 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 200));
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnRect.x, y: btnRect.y, button: 'left', clickCount: 1 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 7000));
+}
+
+for (let i = 0; i < 3; i++) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 300 + i * 80 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1200));
+}
+
+const inp = await evalJs(`(() => {
+  const el = document.querySelector('input, textarea');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+})()`);
+console.log('输入框:', inp ? '有' : '无');
+if (inp) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: inp.x, y: inp.y }).catch(() => {});
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: inp.x, y: inp.y, button: 'left', clickCount: 1 }).catch(() => {});
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: inp.x, y: inp.y, button: 'left', clickCount: 1 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 500));
+  await send('Input.insertText', { text: '点一首侃爷的bound2' }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 500));
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }).catch(() => {});
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }).catch(() => {});
+  console.log('点歌 ✓ 等 60s');
+  await new Promise((r) => setTimeout(r, 60000));
+}
+
+// 读 BottomBar 封面元素 style
+const bb = await evalJs(`(() => {
+  const els = [...document.querySelectorAll('div')].filter(d => {
+    const r = d.getBoundingClientRect();
+    return r.width > 30 && r.height > 30 && r.width < 60 && r.height < 60;
+  });
+  const out = els.map(d => ({
+    cls: (d.className || '').slice(0, 50),
+    bg: d.style.backgroundImage || '(无)',
+    bgc: d.style.background || '(无)',
+  })).filter(x => x.bg !== '(无)' || x.bgc !== '(无)').slice(0, 6);
+  return JSON.stringify(out);
+})()`);
+console.log('封面小元素 style:', bb);
+
+// 读所有 bg-cover 元素
+const bc = await evalJs(`(() => {
+  return JSON.stringify([...document.querySelectorAll('[class*="bg-cover"]')].map(e => ({
+    cls: (e.className || '').slice(0, 60),
+    bg: e.style.backgroundImage || '(无)',
+  })).slice(0, 6));
+})()`);
+console.log('bg-cover:', bc);
+
+// 读当前播放曲名 + 诊断消息
+const st = await evalJs(`(() => {
+  const txts = [...document.querySelectorAll('div,span,p')].filter(e => /Bound|诊断|cover=/.test(e.textContent) && e.children.length === 0).map(e => e.textContent.trim().slice(0, 60));
+  return JSON.stringify([...new Set(txts)].slice(0, 8));
+})()`);
+console.log('文本:', st);
+
+const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true }).catch((e) => ({ error: e.message }));
+if (shot.result?.data) {
+  fs.writeFileSync('E:\\VM\\AI_audio\\ai-radio-v1\\cdp-shot11.png', Buffer.from(shot.result.data, 'base64'));
+  console.log('截图 OK cdp-shot11.png');
+}
+ws.close();

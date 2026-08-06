@@ -51,9 +51,9 @@ function parseResponse(data) {
       id: String(s.id || s.hash || s.songid || ''),
       title: s.name || s.title || s.songname || s.filename || '',
       artist: artistName || s.singername || '',
-      // 酷狗搜索结果不含封面字段：用 hash 拼标准封面 URL 兜底（实测 imge.kugou.com/stdmusic/{hash}.jpg 有效）
-      cover: coverUrl || s.cover || s.pic_big || s.pic_small
-        || (s.hash ? `https://imge.kugou.com/stdmusic/${s.hash}.jpg` : ''),
+      // 封面字段：网易云搜索自带 picUrl；酷狗搜索不含封面 → 由 fillKuGouCovers 走 songinfo 详情接口补真实封面
+      // （切勿用 stdmusic/{hash}.jpg 拼——实测返回酷狗默认占位图 17853B，不是真封面）
+      cover: coverUrl || s.cover || s.pic_big || s.pic_small || '',
       duration: s.duration ? Math.round(typeof s.duration === 'string' ? parseInt(s.duration) : s.duration) : s.dt ? s.dt / 1000 : (s.duration || 0),
       album: (s.album && (s.album.name || s.album)) || s.al?.name || s.albumname || s.album_name || s.albumName || '',
       source: '',
@@ -76,7 +76,53 @@ export async function searchKuGou(keyword, limit) {
   var data = await meting.search(keyword, { limit: limit });
   var items = parseResponse(data);
   items.forEach(function(s) { s.source = 'kugou'; });
+  // 酷狗搜索不含封面字段；用 songinfo 详情接口按 hash 补真实封面
+  // （stdmusic/{hash}.jpg 拼 URL 返回的是酷狗默认占位图，不是真封面——2026-08-06 实测）
+  await fillKuGouCovers(items);
   return items;
+}
+
+/** 酷狗 songinfo 详情接口并发补封面（真实专辑图, ~430ms/5首） */
+async function fillKuGouCovers(items) {
+  const need = items.filter(function(s) { return s.source === 'kugou' && !s.cover && s.id; });
+  if (need.length === 0) return;
+  try {
+    const { kugouIdentity, signatureWebParams, poolToCookieString } = await import('./kugouSign.mjs');
+    const cookie = process.env.KUGOU_COOKIE;
+    if (!cookie) return;
+    const ident = kugouIdentity(cookie);
+    const pool = ident.pool;
+    const webMid = pool.kg_mid || pool.mid || ident.mid;
+    const songinfo = async function(hash) {
+      try {
+        const params = {
+          srcappid: '2919', clientver: '20000', clienttime: String(Date.now()),
+          mid: webMid, uuid: webMid, dfid: pool.dfid || '-',
+          appid: '1014', platid: '4', token: ident.token, userid: ident.userid, hash,
+        };
+        const signed = { ...params, signature: signatureWebParams(params) };
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(signed)) qs.set(k, String(v));
+        const res = await fetch(`https://wwwapi.kugou.com/play/songinfo?${qs.toString()}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            Cookie: poolToCookieString(pool),
+          },
+          signal: AbortSignal.timeout(6000),
+        });
+        const json = await res.json();
+        return json?.data?.img || '';
+      } catch {
+        return '';
+      }
+    };
+    const covers = await Promise.all(need.map(function(s) { return songinfo(s.id); }));
+    need.forEach(function(s, i) {
+      if (covers[i]) s.cover = covers[i].startsWith('http') ? covers[i] : 'https://' + covers[i];
+    });
+  } catch {
+    // 补封面失败不影响搜索
+  }
 }
 
 export async function searchBoth(keyword, limit) {
