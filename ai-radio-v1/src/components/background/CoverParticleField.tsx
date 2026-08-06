@@ -192,6 +192,7 @@ export default function CoverParticleField({
     const lTex = gl.getUniformLocation(lyricProgram, 'uTex');
     const lAlpha = gl.getUniformLocation(lyricProgram, 'uAlpha');
     const lyricModel = createMat4();
+    const coverModel = createMat4(); // real album-art plane (Mineradio-style)
     // glowFollow: kick sway on cover plane X/Y, then *0.92 recoil
     const glowFollow = { x: 0, y: 0 };
 
@@ -325,7 +326,8 @@ export default function CoverParticleField({
         const edgeCanvas = buildEdgeAndDepth(coverCanvas);
         if (disposed || token !== loadToken || forKey !== focusKeyOf()) return;
         applyCoverTextures(coverCanvas, edgeCanvas, loadedFocusKey !== '' && hasCover > 0.5, forKey);
-      } catch {
+      } catch (e) {
+        console.error('[CoverParticleField] loadCover FAIL:', e, 'forKey:', forKey, 'rawUrl:', rawUrl);
         if (!disposed && token === loadToken && forKey === focusKeyOf()) {
           hasCover = 0;
           hasDepth = 0;
@@ -418,6 +420,55 @@ export default function CoverParticleField({
       gl.vertexAttribPointer(aRand, 1, gl.FLOAT, false, 0, 0);
 
       gl.drawArrays(gl.POINTS, 0, geo.count);
+
+      // ——— Real album-art plane (Mineradio-style): cover texture quad,
+      //     same world pose as the lyric plane, drawn before lyrics so
+      //     lyrics layer on top of the cover.
+      if (hasCover > 0.5 && coverTex) {
+        const camC = cameraRefInternal.current.current;
+        if (camC) {
+          const eyeC = orbitEye(camC);
+          const behindC = eyeC[2] < 0;
+          const tSecC = (now - start) * 0.001;
+          const motionC = sampleLyricMotion(tSecC, b.bass, Math.max(kick, b.beat * 0.35));
+          const rollZC = behindC ? -motionC.rollZ : motionC.rollZ;
+          const anchorC = {
+            x: LYRIC_COVER_ANCHOR.x,
+            y: LYRIC_COVER_ANCHOR.y + motionC.offsetY,
+            z: LYRIC_COVER_ANCHOR.z + motionC.offsetZ - 0.02, // slightly behind lyric plane
+          };
+          const coverSize = LYRIC_PLANE_BASE_W * LYRIC_GROUP_SCALE;
+          buildLyricCoverModelMatrix(
+            coverModel,
+            anchorC,
+            coverSize,
+            coverSize,
+            behindC,
+            0,
+            rollZC,
+            motionC.scaleMul,
+          );
+
+          gl.useProgram(lyricProgram);
+          gl.uniformMatrix4fv(lProj, false, proj);
+          gl.uniformMatrix4fv(lView, false, view);
+          gl.uniformMatrix4fv(lModel, false, coverModel);
+          gl.uniform1i(lTex, 0);
+          gl.uniform1f(lAlpha, 1);
+
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, coverTex);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, lyricPosBuf);
+          gl.enableVertexAttribArray(lApos);
+          gl.vertexAttribPointer(lApos, 3, gl.FLOAT, false, 0, 0);
+          gl.bindBuffer(gl.ARRAY_BUFFER, lyricUvBuf);
+          gl.enableVertexAttribArray(lAuv);
+          gl.vertexAttribPointer(lAuv, 2, gl.FLOAT, false, 0, 0);
+
+          gl.drawArrays(gl.TRIANGLES, 0, lyricGeo.count);
+        }
+      }
 
       // ——— Lyric on cover plane (same world pose as particles; camera orbits) ———
       const lyr = lyricMeshRef.current;
