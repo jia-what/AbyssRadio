@@ -14,7 +14,7 @@ import {
   pickArtistTrack,
 } from './albumPlay.mjs';
 
-const cache = new Map(); // key -> { at, tracks }
+const cache = new Map(); // key -> { at, tracks, fullScan }
 const CACHE_MS = 5 * 60 * 1000;
 const MAX_PLAYLISTS = 40;
 /** 歌手/专辑查询按需加深扫描的歌单上限（可能漏在第 40 个之后的歌单里） */
@@ -250,6 +250,8 @@ async function loadLibraryTracks(sessionKey, query) {
       const hit = rankTracks(cached.tracks, query);
       if (hit.length && hit[0].s >= EARLY_HIT) return meta;
     }
+    // 已扫全所有歌单 → miss 直接返回缓存，不再重扫（否则每次点歌都全量拉一遍 40 个歌单，3-5s 卡顿）
+    if (cached.fullScan) return meta;
     // weak / miss in cache → keep scanning more playlists below
   }
 
@@ -324,7 +326,7 @@ async function loadLibraryTracks(sessionKey, query) {
     }
   }
 
-  cache.set(sessionKey, { at: Date.now(), tracks });
+  cache.set(sessionKey, { at: Date.now(), tracks, fullScan: scannedPl >= playlists.length || tracks.length >= MAX_TRACKS });
   return {
     tracks,
     // 本次扫描覆盖信息（供“可能未扫全”提示；有缓存命中时 scanned=0 表示直接用的缓存）
