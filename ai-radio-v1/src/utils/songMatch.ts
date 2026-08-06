@@ -94,10 +94,10 @@ export function extractSongQuery(text: string): string | null {
     if (q) return q;
   }
 
-  // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx
+  // play xxx / 放一首xxx / 放xxx / 听一下xxx / 点歌 xxx / 点一首xxx / 点首xxx
   // 注意：不能匹配「听起来…」这类闲聊（听 后面必须是 一首/一下/空白/再一个听）
   const head = raw.match(
-    /^(?:play\s+|播放|放(?:一?首)?|来(?:首|一首|点)|听(?:听|一?首|一?下|\s+)|点歌\s*)(.+)$/i,
+    /^(?:play\s+|播放|放(?:一?首)?|来(?:首|一首|点)|听(?:听|一?首|一?下|\s+)|点(?:歌|一首|一?首)\s*)(.+)$/i,
   );
   if (head) {
     const q = stripTail(head[1]);
@@ -131,7 +131,7 @@ export function parseSongQuery(query: string): {
   raw: string;
 } {
   let raw = String(query || '').trim();
-  raw = raw.replace(/^(?:play|播放|放|来首|来一首|来点|听|点歌)\s+/i, '').trim();
+  raw = raw.replace(/^(?:play|播放|放|来首|来一首|来点|听|点歌|点一首|点首)\s+/i, '').trim();
   let titlePart = raw;
   let artistPart = '';
   const by = raw.match(/^(.+?)\s+by\s+(.+)$/i);
